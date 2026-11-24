@@ -1,4 +1,11 @@
-const state = { file: null, currentId: null, timer: null };
+const state = {
+  file: null,
+  currentId: null,
+  timer: null,
+  stream: null,
+  sseFailures: 0,
+  refreshPending: false,
+};
 let recipeCache = { jobId: null, text: "" };
 
 const STATUS_LABELS = {
@@ -7,6 +14,7 @@ const STATUS_LABELS = {
   running: "分析中",
   done: "已完成",
   failed: "失败",
+  cancelled: "已取消",
 };
 
 const ORIGIN_LABELS = {
@@ -25,6 +33,7 @@ const STEP_HINTS = {
   fusing: "正在汇总分镜与节奏",
   done: "完成",
   failed: "任务失败",
+  cancelled: "已取消",
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -212,6 +221,72 @@ function stopPolling() {
     clearInterval(state.timer);
     state.timer = null;
   }
+  if (state.stream) {
+    state.stream.close();
+    state.stream = null;
+  }
+  state.sseFailures = 0;
+}
+
+function startPolling(id) {
+  if (state.timer) clearInterval(state.timer);
+  state.timer = setInterval(async () => {
+    if (state.currentId !== id) {
+      stopPolling();
+      return;
+    }
+    const fresh = await renderProject(id, true);
+    if (!fresh || !["queued", "running"].includes(fresh.status)) {
+      stopPolling();
+      loadProjects().catch(() => {});
+    }
+  }, 1600);
+}
+
+function startJobStream(project) {
+  if (!project || !project.job?.id) {
+    startPolling(project?.id);
+    return;
+  }
+  stopPolling();
+  if (typeof EventSource === "undefined") {
+    startPolling(project.id);
+    return;
+  }
+  const projectId = project.id;
+  const stream = new EventSource("/api/jobs/" + encodeURIComponent(project.job.id) + "/events");
+  state.stream = stream;
+  stream.addEventListener("open", () => {
+    state.sseFailures = 0;
+  });
+  stream.addEventListener("progress", async () => {
+    if (state.currentId !== projectId || state.refreshPending) return;
+    state.refreshPending = true;
+    try {
+      const fresh = await renderProject(projectId, true);
+      if (!fresh || !["queued", "running"].includes(fresh.status)) {
+        stopPolling();
+        loadProjects().catch(() => {});
+      }
+    } finally {
+      state.refreshPending = false;
+    }
+  });
+  stream.addEventListener("complete", async () => {
+    if (state.stream === stream) stopPolling();
+    if (state.currentId === projectId) {
+      await renderProject(projectId, true);
+      loadProjects().catch(() => {});
+    }
+  });
+  stream.addEventListener("error", () => {
+    if (state.stream !== stream) return;
+    state.sseFailures += 1;
+    if (state.sseFailures >= 2) {
+      stopPolling();
+      startPolling(projectId);
+    }
+  });
 }
 
 function renderEmpty() {
@@ -244,7 +319,34 @@ function paletteMarkup(colors, className = "palette-dots") {
     .join("");
 }
 
-function shotCard(shot, position) {
+function shotEditorMarkup(shot, project) {
+  const analysis = shot.analysis || {};
+  const palette = (analysis.color_palette || []).join(", ");
+  return (
+    '<form class="shot-editor hidden" data-shot-editor>' +
+      '<div class="editor-head"><div><span>EDIT SHOT</span><strong>修正镜头分析</strong></div>' +
+        '<p>保存后会重新生成 Recipe，并同步到后续提示词参考。</p></div>' +
+      '<div class="editor-grid">' +
+        '<label class="field"><span class="field-label">景别</span><input class="input" name="shot_type" value="' + esc(analysis.shot_type || "") + '" /></label>' +
+        '<label class="field"><span class="field-label">运镜</span><input class="input" name="camera_movement" value="' + esc(analysis.camera_movement || "") + '" /></label>' +
+        '<label class="field"><span class="field-label">主体</span><input class="input" name="subject" value="' + esc(analysis.subject || "") + '" /></label>' +
+        '<label class="field"><span class="field-label">场景</span><input class="input" name="scene" value="' + esc(analysis.scene || "") + '" /></label>' +
+        '<label class="field"><span class="field-label">视觉风格</span><input class="input" name="visual_style" value="' + esc(analysis.visual_style || "") + '" /></label>' +
+        '<label class="field"><span class="field-label">光线</span><input class="input" name="lighting" value="' + esc(analysis.lighting || "") + '" /></label>' +
+        '<label class="field editor-wide"><span class="field-label">色板（逗号分隔）</span><input class="input" name="color_palette" value="' + esc(palette) + '" /></label>' +
+        '<label class="field editor-wide"><span class="field-label">复刻提示词</span><textarea class="textarea" name="prompt" rows="4">' + esc(analysis.prompt || "") + '</textarea></label>' +
+        '<label class="field editor-wide"><span class="field-label">复刻备注</span><textarea class="textarea" name="remake_notes" rows="2">' + esc(analysis.remake_notes || "") + '</textarea></label>' +
+        '<label class="field editor-wide"><span class="field-label">口播 / 转录</span><textarea class="textarea" name="transcript" rows="2">' + esc(shot.transcript || "") + '</textarea></label>' +
+      '</div>' +
+      '<div class="editor-actions">' +
+        '<button class="btn btn-ghost" type="button" data-cancel-shot-edit>取消</button>' +
+        '<button class="btn btn-primary" type="submit" data-shot-id="' + esc(shot.id) + '" data-project-id="' + esc(project.id) + '">保存并重建 Recipe</button>' +
+      '</div>' +
+    '</form>'
+  );
+}
+
+function shotCard(shot, position, project) {
   const analysis = shot.analysis || {};
   const index = String(shot.index).padStart(2, "0");
   const tone = (position % 4) + 1;
@@ -263,7 +365,7 @@ function shotCard(shot, position) {
   const collapsed = position === 0 ? "" : " is-collapsed";
   const expanded = position === 0 ? "true" : "false";
   return (
-    '<article class="result-card tone-' + tone + collapsed + '">' +
+    '<article class="result-card tone-' + tone + collapsed + '" data-shot-card data-shot-id="' + esc(shot.id) + '">' +
       '<button class="shot-toggle" type="button" data-collapse aria-expanded="' + expanded + '">' +
         '<span class="shot-index">' + esc(index) + '</span>' +
         '<span class="shot-visual">' + keyframe + '<b>' + esc(formatClock(shot.end_s)) + '</b></span>' +
@@ -291,12 +393,35 @@ function shotCard(shot, position) {
           '<div class="meta-item"><span>LIGHTING</span><strong>' + esc(analysis.lighting || "—") + '</strong></div>' +
           '<div class="meta-item"><span>ORIGIN</span><strong>' + esc(ORIGIN_LABELS[shot.origin] || shot.origin || "—") + '</strong></div>' +
         '</div>' +
+        '<div class="shot-actions">' +
+          '<button class="btn btn-ghost" type="button" data-edit-shot>编辑分析</button>' +
+          '<button class="btn btn-ghost" type="button" data-reference-project="' + esc(project.id) +
+            '" data-reference-mode="full" data-reference-shot="' + esc(shot.index) + '">用此镜头生成 ↗</button>' +
+        '</div>' +
         '<div class="shot-foot">' +
           '<div class="palette-dots">' + palette + '<span>' + esc(analysis.visual_style || "镜头色板") + '</span></div>' +
           '<span>' + esc(formatClock(shot.start_s)) + ' — ' + esc(formatClock(shot.end_s)) + '</span>' +
         '</div>' +
+        shotEditorMarkup(shot, project) +
       '</div>' +
     '</article>'
+  );
+}
+
+function relatedPromptsMarkup(project) {
+  const prompts = project.prompt_projects || [];
+  if (!prompts.length) return "";
+  return (
+    '<div class="related-prompts">' +
+      '<div><span class="panel-kicker">DERIVED PROMPTS</span><strong>已关联 ' + prompts.length + ' 个提示词方案</strong></div>' +
+      '<div class="related-prompt-list">' +
+        prompts.map((item) =>
+          '<button class="related-prompt-item" type="button" data-open-prompt="' + esc(item.id) + '">' +
+            '<span>' + esc(item.title) + '</span><small>' + esc(item.reference_mode || "style") + ' · ' + esc(STATUS_LABELS[item.status] || item.status) + '</small>' +
+          '</button>'
+        ).join("") +
+      '</div>' +
+    '</div>'
   );
 }
 
@@ -322,7 +447,7 @@ async function renderDetail(project) {
   const shots = project.shots || [];
   const progress = Math.round((job.progress || 0) * 100);
   const recipeText = await ensureRecipe(project);
-  const cards = shots.map((shot, index) => shotCard(shot, index)).join("");
+  const cards = shots.map((shot, index) => shotCard(shot, index, project)).join("");
 
   const progressCard = running
     ? '<div class="progress-card">' +
@@ -332,14 +457,25 @@ async function renderDetail(project) {
       '</div>'
     : "";
 
-  const errorCard = project.status === "failed"
-    ? '<div class="error-card">' + esc(job.error || "分析失败，请重试") + '</div>'
+  const errorCard = ["failed", "cancelled"].includes(project.status)
+    ? '<div class="error-card">' + esc(job.error || (project.status === "cancelled" ? "任务已取消" : "分析失败，请重试")) + '</div>'
     : "";
 
   const downloadActions = project.status === "done"
     ? '<a class="btn btn-secondary" href="' + esc(project.recipe_url) + '" download>下载 VIDEO.md</a>' +
       '<a class="btn btn-ghost" href="' + esc(project.recipe_url) + '?format=json" download>JSON</a>'
     : "";
+
+  const referenceActions = project.status === "done"
+    ? '<button class="btn btn-primary" type="button" data-reference-project="' + esc(project.id) + '" data-reference-mode="style">沿用此风格生成</button>' +
+      '<button class="btn btn-ghost" type="button" data-reference-project="' + esc(project.id) + '" data-reference-mode="structure">参考镜头结构</button>'
+    : "";
+
+  const taskActions = running
+    ? '<button class="btn btn-ghost danger-action" type="button" data-cancel-project="' + esc(project.id) + '">取消分析</button>'
+    : ["failed", "cancelled"].includes(project.status)
+      ? '<button class="btn btn-primary" type="button" data-retry-project="' + esc(project.id) + '">重新分析</button>'
+      : "";
 
   const mediaBlock =
     '<div class="analysis-media">' +
@@ -372,10 +508,13 @@ async function renderDetail(project) {
       '</div>' +
       '<div class="result-actions">' +
         '<span class="status-pill" data-status="' + esc(project.status) + '">' + esc(statusLabel) + '</span>' +
+        taskActions +
+        referenceActions +
         downloadActions +
         '<button class="btn btn-ghost danger-action" type="button" data-delete="' + esc(project.id) + '">删除项目</button>' +
       '</div>' +
     '</div>' +
+    relatedPromptsMarkup(project) +
     (shots.length ? summaryMarkup(project, shots) : "") +
     progressCard +
     errorCard +
@@ -401,13 +540,29 @@ async function openProject(id) {
   await loadProjects().catch(() => {});
   const project = await renderProject(id);
   if (project && ["queued", "running"].includes(project.status)) {
-    state.timer = setInterval(async () => {
-      const fresh = await renderProject(id, true);
-      if (!fresh || !["queued", "running"].includes(fresh.status)) {
-        stopPolling();
-        loadProjects().catch(() => {});
-      }
-    }, 1600);
+    startJobStream(project);
+  }
+}
+
+async function cancelProject(id) {
+  if (!confirm("确定取消当前分析任务？")) return;
+  try {
+    await api("/api/projects/" + id + "/cancel", { method: "POST" });
+    stopPolling();
+    await openProject(id);
+    toast("分析任务已取消");
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function reanalyzeProject(id) {
+  try {
+    await api("/api/projects/" + id + "/analyze", { method: "POST" });
+    toast("已重新开始分析");
+    await openProject(id);
+  } catch (error) {
+    toast(error.message);
   }
 }
 
@@ -463,10 +618,56 @@ function bindDetail() {
   const detail = $("#detail");
   if (!detail) return;
   detail.addEventListener("click", async (event) => {
+    const editShot = event.target.closest("[data-edit-shot]");
+    if (editShot) {
+      const card = editShot.closest("[data-shot-card]");
+      const editor = card?.querySelector("[data-shot-editor]");
+      if (editor) {
+        editor.classList.toggle("hidden");
+        if (!editor.classList.contains("hidden")) {
+          editor.querySelector("input, textarea")?.focus();
+          editor.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+      }
+      return;
+    }
+    const cancelShotEdit = event.target.closest("[data-cancel-shot-edit]");
+    if (cancelShotEdit) {
+      cancelShotEdit.closest("[data-shot-editor]")?.classList.add("hidden");
+      return;
+    }
+    const reference = event.target.closest("[data-reference-project]");
+    if (reference) {
+      if (typeof window.openPromptFromReference === "function") {
+        window.openPromptFromReference(
+          reference.dataset.referenceProject,
+          reference.dataset.referenceMode || "style",
+          reference.dataset.referenceShot || null
+        );
+      }
+      return;
+    }
+    const openPrompt = event.target.closest("[data-open-prompt]");
+    if (openPrompt) {
+      if (typeof window.openPromptProjectById === "function") {
+        window.openPromptProjectById(openPrompt.dataset.openPrompt);
+      }
+      return;
+    }
     const copy = event.target.closest("[data-copy-text]");
     if (copy) {
       const copied = await copyValue(copy.dataset.copyText || "");
       toast(copied ? "Prompt 已复制到剪贴板" : "没有可复制的 Prompt");
+      return;
+    }
+    const cancel = event.target.closest("[data-cancel-project]");
+    if (cancel) {
+      cancelProject(cancel.dataset.cancelProject);
+      return;
+    }
+    const retry = event.target.closest("[data-retry-project]");
+    if (retry) {
+      reanalyzeProject(retry.dataset.retryProject);
       return;
     }
     const remove = event.target.closest("[data-delete]");
@@ -492,6 +693,43 @@ function bindDetail() {
         if (button) button.setAttribute("aria-expanded", String(!allOpen));
       });
       expandAll.textContent = allOpen ? "全部展开" : "全部收起";
+    }
+  });
+
+  detail.addEventListener("submit", async (event) => {
+    const form = event.target.closest("[data-shot-editor]");
+    if (!form) return;
+    event.preventDefault();
+    const button = form.querySelector('button[type="submit"]');
+    const shotId = button?.dataset.shotId;
+    const projectId = button?.dataset.projectId;
+    if (!shotId || !projectId) return;
+    const data = new FormData(form);
+    const payload = {};
+    for (const field of ["shot_type", "camera_movement", "subject", "scene", "visual_style", "lighting", "prompt", "remake_notes", "transcript"]) {
+      payload[field] = String(data.get(field) ?? "").trim();
+    }
+    payload.color_palette = String(data.get("color_palette") || "")
+      .split(/[,，]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    button.disabled = true;
+    const label = button.textContent;
+    button.textContent = "保存中…";
+    try {
+      await api("/api/projects/" + projectId + "/shots/" + shotId, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      recipeCache = { jobId: null, text: "" };
+      toast("镜头分析已更新，Recipe 已重建");
+      await renderProject(projectId);
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      button.disabled = false;
+      button.textContent = label;
     }
   });
 }

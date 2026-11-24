@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-style="a">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex,nofollow" />
+  <meta name="theme-color" content="#f8f5ff" />
+  <title>{{ title }} · 只读分镜</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="share-page" data-token="{{ token }}" data-permission="{{ permission }}">
+  <div class="ambient" aria-hidden="true"></div>
+  <header class="share-topbar">
+    <a class="brand" href="/share/{{ token }}" aria-label="只读分镜首页">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="16" rx="4"></rect>
+          <path d="M8 4v16M16 4v16M3 9h5M16 9h5M3 15h5M16 15h5"></path>
+        </svg>
+      </span>
+      <span class="brand-copy"><strong>ReelReverse</strong><span>SHARED STORYBOARD</span></span>
+    </a>
+    <span class="share-permission-pill">{{ '可评论' if permission == 'comment' else '只读浏览' }}</span>
+  </header>
+
+  <main id="share-app" class="share-shell" aria-live="polite">
+    <div class="share-loading"><span>✦</span><p>正在加载共享分镜…</p></div>
+  </main>
+
+  <footer class="share-footer">
+    <span>由 ReelReverse 生成 · 链接仅展示选定内容</span>
+  </footer>
+  <script src="/static/share.js"></script>
+</body>
+</html>

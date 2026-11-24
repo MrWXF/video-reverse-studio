@@ -51,7 +51,13 @@ class BasicAuthMiddleware:
             return
 
         settings = get_settings()
-        if not settings.app_password or scope["path"] == "/healthz":
+        public_path = (
+            scope["path"] == "/healthz"
+            or scope["path"].startswith("/share/")
+            or scope["path"].startswith("/api/shares/")
+            or scope["path"].startswith("/static/")
+        )
+        if not settings.app_password or public_path:
             await self.app(scope, receive, send)
             return
 

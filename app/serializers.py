@@ -1,4 +1,12 @@
-from .models import Job, Project, PromptProject, Shot
+from .models import (
+    DeliveryReview,
+    Job,
+    Project,
+    PromptComment,
+    PromptProject,
+    PromptShare,
+    Shot,
+)
 
 
 def shot_payload(shot: Shot) -> dict:
@@ -47,6 +55,7 @@ def project_payload(
         "width": project.width,
         "height": project.height,
         "fps": project.fps,
+        "shot_count": len(project.shots) if project.shots else 0,
         "created_at": project.created_at.isoformat() if project.created_at else None,
         "video_url": f"/api/projects/{project.id}/video",
         "recipe_url": f"/api/projects/{project.id}/recipe",
@@ -63,6 +72,25 @@ def prompt_project_payload(
 ) -> dict:
     brief = project.brief_json or {}
     plan = project.plan_json or {}
+    snapshot = project.reference_snapshot_json or {}
+    reference_recipe = snapshot.get("recipe") or {}
+    reference_shots = reference_recipe.get("shots") or []
+    reference = None
+    if project.source_project_id and snapshot:
+        reference = {
+            "project_id": project.source_project_id,
+            "project_url": f"/api/projects/{project.source_project_id}",
+            "mode": project.reference_mode or snapshot.get("mode") or "style",
+            "title": reference_recipe.get("title", ""),
+            "shot_count": len(reference_shots),
+            "pacing": reference_recipe.get("pacing", ""),
+            "summary": reference_recipe.get("summary", ""),
+            "palette": [
+                color
+                for shot in reference_shots
+                for color in (shot.get("color_palette") or [])
+            ][:8],
+        }
     payload = {
         "id": project.id,
         "title": project.title,
@@ -74,10 +102,56 @@ def prompt_project_payload(
         "target_model": brief.get("target_model", ""),
         "shot_count": len(plan.get("shots") or []),
         "brief": brief,
+        "entity_bible": project.entity_bible_json or {},
+        "version_count": len(project.versions),
+        "source_project_id": project.source_project_id,
+        "reference_mode": project.reference_mode or "style",
+        "reference": reference,
         "export_url": f"/api/prompt-projects/{project.id}/export",
         "created_at": project.created_at.isoformat() if project.created_at else None,
         "updated_at": project.updated_at.isoformat() if project.updated_at else None,
     }
     if include_plan:
         payload["plan"] = plan
+        if reference is not None:
+            reference["recipe"] = reference_recipe
     return payload
+
+
+def review_payload(review: DeliveryReview, include_result: bool = False) -> dict:
+    payload = {
+        "id": review.id,
+        "filename": review.filename,
+        "status": review.status,
+        "step": review.step,
+        "progress": review.progress,
+        "error": review.error,
+        "created_at": review.created_at.isoformat() if review.created_at else None,
+        "updated_at": review.updated_at.isoformat() if review.updated_at else None,
+    }
+    if include_result:
+        payload["result"] = review.result_json or {}
+    return payload
+
+
+def share_payload(share: PromptShare, version_number: int | None = None) -> dict:
+    return {
+        "id": share.id,
+        "token": share.token,
+        "url": f"/share/{share.token}",
+        "permission": share.permission,
+        "version_id": share.version_id,
+        "version_number": version_number,
+        "expires_at": share.expires_at.isoformat() if share.expires_at else None,
+        "revoked_at": share.revoked_at.isoformat() if share.revoked_at else None,
+        "created_at": share.created_at.isoformat() if share.created_at else None,
+    }
+
+
+def comment_payload(comment: PromptComment) -> dict:
+    return {
+        "id": comment.id,
+        "author": comment.author,
+        "content": comment.content,
+        "created_at": comment.created_at.isoformat() if comment.created_at else None,
+    }

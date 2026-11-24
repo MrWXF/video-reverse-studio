@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 Origin = Literal["filmed", "ai_generated", "code_generated", "unknown"]
 PromptLanguage = Literal["en", "zh"]
+ReferenceMode = Literal["style", "structure", "full"]
 
 
 class ShotAnalysis(BaseModel):
@@ -65,6 +66,29 @@ class Recipe(BaseModel):
     generated_at: datetime
 
 
+class ReferenceContext(BaseModel):
+    project_id: str
+    mode: ReferenceMode = "style"
+    recipe: Recipe
+
+
+class EntityItem(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=80)
+    description: str = Field(default="", max_length=1000)
+    appearance: str = Field(default="", max_length=1000)
+    must_keep: list[str] = Field(default_factory=list)
+
+
+class EntityBible(BaseModel):
+    characters: list[EntityItem] = Field(default_factory=list)
+    products: list[EntityItem] = Field(default_factory=list)
+    wardrobe: list[EntityItem] = Field(default_factory=list)
+    scenes: list[EntityItem] = Field(default_factory=list)
+    consistency_rules: list[str] = Field(default_factory=list)
+
+
 class PromptBrief(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -81,6 +105,26 @@ class PromptBrief(BaseModel):
     negative_prompt: str = Field(default="", max_length=1000)
     constraints: list[str] = Field(default_factory=list)
     reference_project_id: str | None = None
+    reference_mode: ReferenceMode = "style"
+    entity_bible: EntityBible = Field(default_factory=EntityBible)
+
+
+class ShotAnalysisUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    shot_type: str | None = None
+    camera_movement: str | None = None
+    subject: str | None = None
+    scene: str | None = None
+    visual_style: str | None = None
+    lighting: str | None = None
+    color_palette: list[str] | None = None
+    origin: Origin | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    evidence: list[str] | None = None
+    prompt: str | None = None
+    remake_notes: str | None = None
+    transcript: str | None = None
 
 
 class PromptShot(BaseModel):
@@ -99,6 +143,38 @@ class PromptShot(BaseModel):
     negative_prompt: str = Field(default="")
     transition: str = Field(default="")
     remake_notes: str = Field(default="")
+    source_shot_index: int | None = Field(default=None, ge=1)
+    locked_fields: list[str] = Field(default_factory=list)
+
+
+class PromptShotUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    shot_type: str | None = None
+    camera_movement: str | None = None
+    subject: str | None = None
+    action: str | None = None
+    scene: str | None = None
+    lighting: str | None = None
+    color_palette: list[str] | None = None
+    prompt: str | None = None
+    negative_prompt: str | None = None
+    transition: str | None = None
+    remake_notes: str | None = None
+    locked_fields: list[str] | None = None
+
+
+class ShareCreate(BaseModel):
+    permission: Literal["read", "comment"] = "read"
+    expires_in_days: int | None = Field(default=None, ge=1, le=365)
+    version_id: str | None = None
+
+
+class CommentCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    author: str = Field(default="访客", max_length=80)
+    content: str = Field(min_length=1, max_length=2000)
 
 
 class PromptPlan(BaseModel):
@@ -109,6 +185,7 @@ class PromptPlan(BaseModel):
     duration_s: float = Field(default=15.0, ge=0.0)
     aspect_ratio: str = Field(default="16:9")
     global_style: str = Field(default="")
+    target_profile: dict = Field(default_factory=dict)
     shots: list[PromptShot] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)

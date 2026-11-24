@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from .api.prompt_routes import router as prompt_router
 from .api.routes import router
+from .api.share_routes import router as share_router
 from .config import PROJECT_ROOT, get_settings
 from .db import SessionLocal, init_db
 from .models import Job, PromptProject
@@ -59,6 +60,7 @@ app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 app.add_middleware(BasicAuthMiddleware)
 app.include_router(router)
 app.include_router(prompt_router)
+app.include_router(share_router)
 app.mount(
     "/static",
     StaticFiles(directory=str(PROJECT_ROOT / "app" / "static")),

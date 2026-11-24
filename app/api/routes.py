@@ -1,18 +1,39 @@
 import json
 import shutil
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+)
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    PlainTextResponse,
+    StreamingResponse,
+)
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..config import Settings, get_settings
 from ..db import get_db
-from ..models import Job, Project, Shot
-from ..serializers import job_payload, project_payload
-from ..services import media, pipeline
+from ..models import Job, Project, PromptProject, Shot
+from ..schemas import ShotAnalysis, ShotAnalysisUpdate
+from ..serializers import job_payload, project_payload, shot_payload
+from ..services import media, pipeline, sse
+from ..services.reference import (
+    aspect_ratio_for,
+    build_reference_context,
+    rebuild_project_recipe,
+)
 
 router = APIRouter()
 ALLOWED_SUFFIXES = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"}
@@ -96,7 +117,11 @@ def create_project(
 
 @router.get("/api/projects")
 def list_projects(db: Session = Depends(get_db)) -> list[dict]:
-    projects = db.scalars(select(Project).order_by(Project.created_at.desc())).all()
+    projects = db.scalars(
+        select(Project)
+        .options(selectinload(Project.shots))
+        .order_by(Project.created_at.desc())
+    ).all()
     payload: list[dict] = []
     for project in projects:
         job = db.scalar(
@@ -124,7 +149,50 @@ def get_project(project_id: str, db: Session = Depends(get_db)) -> dict:
         .order_by(Job.created_at.desc())
         .limit(1)
     )
-    return project_payload(project, job, include_shots=True)
+    payload = project_payload(project, job, include_shots=True)
+    prompt_projects = db.scalars(
+        select(PromptProject)
+        .where(PromptProject.source_project_id == project_id)
+        .order_by(PromptProject.created_at.desc())
+    ).all()
+    payload["prompt_projects"] = [
+        {
+            "id": item.id,
+            "title": item.title,
+            "status": item.status,
+            "reference_mode": item.reference_mode,
+        }
+        for item in prompt_projects
+    ]
+    return payload
+
+
+@router.get("/api/projects/{project_id}/reference-context")
+def get_reference_context(project_id: str, db: Session = Depends(get_db)) -> dict:
+    project = db.scalar(
+        select(Project)
+        .options(selectinload(Project.shots))
+        .where(Project.id == project_id)
+    )
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    if project.status != "done" or not project.shots:
+        raise HTTPException(status_code=409, detail="项目尚未完成分析")
+    context = build_reference_context(project)
+    recipe = context.recipe
+    return {
+        "reference": context.model_dump(mode="json"),
+        "suggested": {
+            "title": f"{recipe.title} · 新方案",
+            "duration_s": round(recipe.duration, 1),
+            "aspect_ratio": aspect_ratio_for(recipe.width, recipe.height),
+            "shot_count": min(max(len(recipe.shots), 1), 8),
+            "style": next(
+                (shot.visual_style for shot in recipe.shots if shot.visual_style), ""
+            ),
+            "mood": recipe.summary,
+        },
+    }
 
 
 @router.get("/api/projects/{project_id}/video")
@@ -145,6 +213,40 @@ def get_shot_keyframe(project_id: str, shot_id: int, db: Session = Depends(get_d
         raise HTTPException(status_code=404, detail="文件不存在")
     path = _project_media_path(project_id, shot.keyframe_path, get_settings())
     return FileResponse(path)
+
+
+@router.patch("/api/projects/{project_id}/shots/{shot_id}")
+def update_shot_analysis(
+    project_id: str,
+    shot_id: int,
+    update: ShotAnalysisUpdate,
+    db: Session = Depends(get_db),
+) -> dict:
+    project = db.scalar(
+        select(Project)
+        .options(selectinload(Project.shots))
+        .where(Project.id == project_id)
+    )
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    if project.status in {"queued", "running"}:
+        raise HTTPException(status_code=409, detail="项目正在分析，暂时不能编辑")
+    shot = next((item for item in project.shots if item.id == shot_id), None)
+    if shot is None:
+        raise HTTPException(status_code=404, detail="镜头不存在")
+
+    changes = update.model_dump(exclude_unset=True)
+    transcript = changes.pop("transcript", None)
+    analysis = ShotAnalysis.model_validate({**(shot.analysis or {}), **changes})
+    shot.analysis = analysis.model_dump(mode="json")
+    shot.origin = analysis.origin
+    shot.confidence = analysis.confidence
+    if transcript is not None:
+        shot.transcript = transcript
+    project.status = "done"
+    db.commit()
+    rebuild_project_recipe(project, get_settings())
+    return shot_payload(shot)
 
 
 @router.post("/api/projects/{project_id}/analyze", status_code=202)
@@ -181,7 +283,7 @@ def get_recipe(
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="项目不存在")
-    output_dir = pipeline.project_dir(project_id) / "output"
+    output_dir = pipeline.project_dir(project_id, get_settings()) / "output"
 
     if format.lower() == "json":
         path = output_dir / "video.json"
@@ -208,6 +310,46 @@ def get_job(job_id: str, db: Session = Depends(get_db)) -> dict:
     if job is None:
         raise HTTPException(status_code=404, detail="任务不存在")
     return job_payload(job) or {}
+
+
+@router.get("/api/jobs/{job_id}/events")
+def job_events(job_id: str, request: Request, db: Session = Depends(get_db)):
+    if db.get(Job, job_id) is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return StreamingResponse(
+        sse.job_event_stream(request, job_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/api/projects/{project_id}/cancel", status_code=202)
+def cancel_project(project_id: str, db: Session = Depends(get_db)) -> dict:
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    job = db.scalar(
+        select(Job)
+        .where(
+            Job.project_id == project_id,
+            Job.status.in_(["queued", "running"]),
+        )
+        .order_by(Job.created_at.desc())
+        .limit(1)
+    )
+    if job is None:
+        raise HTTPException(status_code=409, detail="该项目没有可取消的任务")
+    job.status = "cancelled"
+    job.step = "cancelled"
+    job.error = "用户已取消任务"
+    job.updated_at = datetime.now(timezone.utc)
+    project.status = "cancelled"
+    db.commit()
+    return {"project_id": project_id, "job_id": job.id, "status": "cancelled"}
 
 
 @router.delete("/api/projects/{project_id}")

@@ -241,6 +241,27 @@
         </div>
 
         <form id="prompt-form" class="prompt-form" novalidate>
+          <div class="reference-picker">
+            <div class="field-grid">
+              <label class="field wide">
+                <span class="field-label">参考项目 · 可选</span>
+                <select id="prompt-reference" class="input">
+                  <option value="">不使用参考项目</option>
+                </select>
+                <span class="field-hint"><span>从已完成的逆向项目中继承风格、节奏或镜头结构</span><b>REFERENCE</b></span>
+              </label>
+              <label class="field wide">
+                <span class="field-label">继承方式</span>
+                <select id="prompt-reference-mode" class="input" disabled>
+                  <option value="style">沿用风格 · 色调 / 光线 / 质感 / 节奏</option>
+                  <option value="structure">参考结构 · 景别顺序 / 运镜 / 时长</option>
+                  <option value="full">完整改拍 · 逐镜参考构图与镜头语言</option>
+                </select>
+              </label>
+            </div>
+            <div id="reference-preview" class="reference-preview hidden"></div>
+          </div>
+
           <div class="field-grid">
             <label class="field wide">
               <span class="field-label">方案名称</span>
@@ -275,6 +296,7 @@
                   <option value="runway">Runway</option>
                   <option value="kling">可灵 / Kling</option>
                   <option value="jimeng">即梦 / Jimeng</option>
+                  <option value="luma">Luma / Dream Machine</option>
                   <option value="pika">Pika</option>
                   <option value="sora">Sora</option>
                 </select>

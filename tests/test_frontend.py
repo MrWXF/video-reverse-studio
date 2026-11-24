@@ -54,3 +54,17 @@ def test_frontend_assets_expose_design_system_hooks():
     assert "plan-overview" in prompt_js
     assert "data-status" in prompt_js
     assert "data-copy-text" in prompt_js
+    assert 'data-reference-mode="full"' in app_js
+    assert 'id="prompt-reference"' in html
+    assert 'id="prompt-reference-mode"' in html
+    assert 'id="reference-preview"' in html
+    assert "data-open-reference" in prompt_js
+    assert "reference-source-card" in prompt_js
+    assert "data-edit-shot" in app_js
+    assert "data-shot-editor" in app_js
+    assert "data-prompt-shot-editor" in prompt_js
+    assert "data-entity-form" in prompt_js
+    assert "data-restore-version" in prompt_js
+    assert "comparison-summary" in prompt_js
+    assert ".prompt-studio-tools" in css
+    assert ".field-locks" in css

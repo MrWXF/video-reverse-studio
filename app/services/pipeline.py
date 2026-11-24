@@ -14,6 +14,10 @@ from .llm import LLMGateway
 logger = logging.getLogger(__name__)
 
 
+class JobCancelled(Exception):
+    pass
+
+
 def project_dir(project_id: str, settings: Settings | None = None) -> Path:
     settings = settings or get_settings()
     return settings.data_dir / "projects" / project_id
@@ -50,6 +54,13 @@ def run_pipeline(project_id: str, job_id: str) -> None:
             return
         try:
             _execute(db, project, job, settings)
+        except JobCancelled:
+            project.status = "cancelled"
+            job.status = "cancelled"
+            job.step = "cancelled"
+            job.error = "用户已取消任务"
+            job.updated_at = datetime.now(timezone.utc)
+            db.commit()
         except Exception as exc:
             logger.exception("pipeline failed for project %s", project_id)
             project.status = "failed"
@@ -66,6 +77,7 @@ def _execute(db, project: Project, job: Job, settings: Settings) -> None:
     if not source.exists():
         raise FileNotFoundError(f"源视频不存在：{source}")
 
+    _check_cancelled(db, job)
     _update_job(db, job, status="running", step="probing", progress=0.03)
     project.status = "running"
     db.commit()
@@ -76,11 +88,13 @@ def _execute(db, project: Project, job: Job, settings: Settings) -> None:
     project.height = meta.height
     project.fps = meta.fps
     db.commit()
+    _check_cancelled(db, job)
 
     _update_job(db, job, step="segmenting", progress=0.1)
     segments = media.detect_shots(source, meta, settings)
     if not segments:
         raise RuntimeError("未能生成任何分镜")
+    _check_cancelled(db, job)
 
     ffmpeg = media.resolve_ffmpeg(settings.ffmpeg_bin)
     if not ffmpeg:
@@ -96,15 +110,18 @@ def _execute(db, project: Project, job: Job, settings: Settings) -> None:
         media.extract_keyframe(ffmpeg, source, midpoint, frame)
         keyframes.append(frame)
         _update_job(db, job, progress=0.15 + 0.3 * (index + 1) / len(segments))
+    _check_cancelled(db, job)
 
     _update_job(db, job, step="transcribing", progress=0.47)
     transcripts = _transcribe(root, source, ffmpeg, settings)
+    _check_cancelled(db, job)
 
     _update_job(db, job, step="analyzing", progress=0.5)
     gateway = LLMGateway(settings)
     analyses = _analyze_shots(
         gateway, keyframes, segments, transcripts, meta, settings, db, job
     )
+    _check_cancelled(db, job)
 
     _update_job(db, job, step="fusing", progress=0.9)
     shot_rows: list[dict] = []
@@ -136,6 +153,7 @@ def _execute(db, project: Project, job: Job, settings: Settings) -> None:
             }
         )
     db.commit()
+    _check_cancelled(db, job)
 
     recipe = fusion.build_recipe(
         title=project.title,
@@ -156,6 +174,12 @@ def _execute(db, project: Project, job: Job, settings: Settings) -> None:
     _update_job(db, job, status="done", step="done", progress=1.0, error="")
     project.status = "done"
     db.commit()
+
+
+def _check_cancelled(db, job: Job) -> None:
+    db.refresh(job)
+    if job.status == "cancelled":
+        raise JobCancelled()
 
 
 def _transcribe(
@@ -196,4 +220,5 @@ def _analyze_shots(
         for done, result in enumerate(executor.map(work, range(len(segments))), start=1):
             results.append(result)
             _update_job(db, job, progress=0.5 + 0.38 * done / len(segments))
+            _check_cancelled(db, job)
     return results

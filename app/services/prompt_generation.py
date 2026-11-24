@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -10,8 +11,11 @@ from ..config import Settings, get_settings
 from ..db import SessionLocal
 from ..models import PromptProject
 from ..prompts import load_prompt
-from ..schemas import PromptBrief, PromptPlan, PromptShot
+from ..schemas import PromptBrief, PromptPlan, PromptShot, ReferenceContext
 from .llm import LLMGateway
+from .model_profiles import get_model_profile, validate_prompt_plan
+from .prompt_versions import create_prompt_version
+from .reference import compact_reference
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +29,20 @@ _PALETTES = [
     ["#052e16", "#22c55e", "#dcfce7"],
     ["#3b0764", "#a855f7", "#f3e8ff"],
 ]
+
+_LOCKABLE_FIELDS = {
+    "shot_type",
+    "camera_movement",
+    "subject",
+    "action",
+    "scene",
+    "lighting",
+    "color_palette",
+    "prompt",
+    "negative_prompt",
+    "transition",
+    "remake_notes",
+}
 
 
 def _update_project(
@@ -57,17 +75,30 @@ def run_prompt_generation(project_id: str) -> None:
             return
 
         try:
+            db.refresh(project)
+            if project.status == "cancelled":
+                return
             brief = PromptBrief.model_validate(project.brief_json or {})
+            reference = (
+                ReferenceContext.model_validate(project.reference_snapshot_json)
+                if project.reference_snapshot_json
+                else None
+            )
             _update_project(db, project, status="running", step="planning", progress=0.15)
             gateway = LLMGateway(settings)
-            plan, notes = generate_prompt_plan(brief, gateway)
+            plan, notes = generate_prompt_plan(brief, gateway, reference)
             _update_project(db, project, step="validating", progress=0.85)
-            plan = normalize_prompt_plan(plan, brief)
+            plan = normalize_prompt_plan(plan, brief, reference=reference)
             plan.warnings.extend(notes)
+
+            db.refresh(project)
+            if project.status == "cancelled":
+                return
 
             project.title = plan.title or project.title
             project.plan_json = plan.model_dump(mode="json")
             project.metrics = gateway.stats()
+            create_prompt_version(db, project, "generate")
             _update_project(
                 db,
                 project,
@@ -88,17 +119,18 @@ def run_prompt_generation(project_id: str) -> None:
 def generate_prompt_plan(
     brief: PromptBrief,
     gateway: LLMGateway,
+    reference: ReferenceContext | None = None,
 ) -> tuple[PromptPlan, list[str]]:
     if not gateway.enabled:
-        return mock_prompt_plan(brief), ["Mock 模式：未调用文本模型"]
+        return mock_prompt_plan(brief, reference), ["Mock 模式：未调用文本模型"]
 
     llm = gateway.chat_model()
     if llm is None:
-        return mock_prompt_plan(brief), ["未配置文本模型，已使用 Mock 方案"]
+        return mock_prompt_plan(brief, reference), ["未配置文本模型，已使用 Mock 方案"]
 
     messages = [
         SystemMessage(content=load_prompt("video_prompt_generation")),
-        HumanMessage(content=_brief_text(brief)),
+        HumanMessage(content=_brief_text(brief, reference)),
     ]
 
     try:
@@ -123,13 +155,25 @@ def generate_prompt_plan(
         raise RuntimeError(f"提示词生成失败：{str(exc)[:500]}") from exc
 
 
-def _brief_text(brief: PromptBrief) -> str:
+def _brief_text(brief: PromptBrief, reference: ReferenceContext | None = None) -> str:
     payload = json.dumps(brief.model_dump(mode="json"), ensure_ascii=False, indent=2)
-    return (
+    text = (
         "请根据以下创意简报生成视频提示词方案。"
         "严格按 schema 输出，不要输出 Markdown 代码块。\n\n"
         f"{payload}"
     )
+    if reference is not None:
+        reference_payload = json.dumps(
+            compact_reference(reference), ensure_ascii=False, indent=2
+        )
+        text += (
+            "\n\n以下是从参考项目提取的可迁移上下文。请严格按 reference_mode 继承：\n"
+            "- style：只继承色调、光线、质感、景别与运镜偏好和节奏，不复制原主体与情节。\n"
+            "- structure：继承镜头数量、时长结构、景别顺序与运镜，主体和场景必须根据新创意重写。\n"
+            "- full：逐镜参考构图、光线和镜头语言，但替换主体、动作和场景，避免直接复制原片。\n"
+            f"{reference_payload}"
+        )
+    return text
 
 
 def normalize_prompt_plan(
@@ -137,12 +181,19 @@ def normalize_prompt_plan(
     brief: PromptBrief,
     *,
     generated_at: datetime | None = None,
+    reference: ReferenceContext | None = None,
 ) -> PromptPlan:
     shots = sorted(plan.shots, key=lambda item: item.index)
     if not shots:
         raise RuntimeError("模型未返回任何镜头")
 
     warnings = list(plan.warnings)
+    global_style = (
+        plan.global_style.strip()
+        or brief.style
+        or _reference_style(reference)
+        or "cinematic natural style"
+    )
     if len(shots) > brief.shot_count:
         shots = shots[: brief.shot_count]
         warnings.append(f"镜头数超过目标，已截断为 {brief.shot_count} 个")
@@ -172,11 +223,16 @@ def normalize_prompt_plan(
         shot.end_s = round(cursor + duration, 3)
         shot.duration = duration
         cursor = shot.end_s
-        shot.prompt = shot.prompt.strip() or _compose_prompt(shot, brief)
+        shot.prompt = shot.prompt.strip() or _compose_prompt(shot, brief, global_style)
         shot.negative_prompt = shot.negative_prompt or brief.negative_prompt
         shot.shot_type = shot.shot_type or "中景"
         shot.camera_movement = shot.camera_movement or "固定"
         shot.transition = shot.transition or _TRANSITIONS[(index - 1) % len(_TRANSITIONS)]
+        shot.locked_fields = _clean_locked_fields(shot.locked_fields)
+        if reference is not None and reference.mode in {"structure", "full"}:
+            source_shots = reference.recipe.shots
+            if source_shots and not shot.source_shot_index:
+                shot.source_shot_index = source_shots[(index - 1) % len(source_shots)].index
         normalized_shots.append(shot)
 
     plan.title = plan.title.strip() or brief.title.strip() or brief.idea[:40]
@@ -187,33 +243,56 @@ def normalize_prompt_plan(
     plan.language = brief.language
     plan.duration_s = brief.duration_s
     plan.aspect_ratio = brief.aspect_ratio
-    plan.global_style = plan.global_style.strip() or brief.style or "cinematic natural style"
+    plan.global_style = global_style
     plan.shots = normalized_shots
-    plan.warnings = warnings
+    plan.target_profile = get_model_profile(brief.target_model)
+    plan.warnings = [*warnings, *validate_prompt_plan(plan, brief.duration_s)]
     plan.generated_at = generated_at or datetime.now(timezone.utc)
     return plan
 
 
-def _compose_prompt(shot: PromptShot, brief: PromptBrief) -> str:
+def _compose_prompt(
+    shot: PromptShot,
+    brief: PromptBrief,
+    global_style: str = "",
+) -> str:
     subject = shot.subject or "the main subject"
     action = shot.action or "performs a clear, visually readable action"
     scene = shot.scene or "a clean cinematic environment"
     lighting = shot.lighting or "cinematic natural lighting"
-    style = brief.style or "commercial film look"
+    style = global_style or "commercial film look"
     mood = brief.mood or "clear and engaging"
-    return (
+    prompt = (
         f"{shot.shot_type} shot of {subject}, {action}, in {scene}, "
         f"{shot.camera_movement}, {lighting}, {style}, {mood} mood, "
         f"{brief.aspect_ratio} aspect ratio, optimized for {brief.target_model}, "
         "detailed texture, realistic motion, high production value"
     )
+    rules = [rule for rule in brief.entity_bible.consistency_rules if rule][:3]
+    if rules:
+        prompt += ", continuity: " + "; ".join(rules)
+    return prompt
 
 
-def mock_prompt_plan(brief: PromptBrief) -> PromptPlan:
+def mock_prompt_plan(
+    brief: PromptBrief,
+    reference: ReferenceContext | None = None,
+) -> PromptPlan:
     seed = int(hashlib.sha1(brief.idea.encode("utf-8")).hexdigest()[:8], 16)
     count = brief.shot_count
     step = brief.duration_s / count
     shots: list[PromptShot] = []
+    reference_shots = reference.recipe.shots if reference else []
+    reference_palette = [
+        color
+        for shot in reference_shots
+        for color in shot.color_palette
+    ]
+    global_style = (
+        brief.style or _reference_style(reference) or "cinematic natural style"
+    )
+    entity_subject = _entity_subject(brief)
+    entity_scene = _entity_scene(brief)
 
     for index in range(1, count + 1):
         local = seed + index * 31
@@ -222,6 +301,18 @@ def mock_prompt_plan(brief: PromptBrief) -> PromptPlan:
         lighting = _LIGHTING[(local // 5) % len(_LIGHTING)]
         transition = _TRANSITIONS[(local // 7) % len(_TRANSITIONS)]
         palette = _PALETTES[(local // 11) % len(_PALETTES)]
+        source_shot_index = None
+        if reference_shots:
+            source_shot = reference_shots[(index - 1) % len(reference_shots)]
+            if reference.mode in {"structure", "full"}:
+                shot_type = source_shot.shot_type
+                movement = source_shot.camera_movement
+                source_shot_index = source_shot.index
+            if reference.mode in {"style", "full"}:
+                lighting = source_shot.lighting or lighting
+                palette = source_shot.color_palette or palette
+            elif reference_palette:
+                palette = reference_palette[:5]
         start_s = round((index - 1) * step, 3)
         end_s = round(index * step, 3)
         shot = PromptShot(
@@ -231,17 +322,18 @@ def mock_prompt_plan(brief: PromptBrief) -> PromptPlan:
             duration=round(step, 3),
             shot_type=shot_type,
             camera_movement=movement,
-            subject="the product or protagonist",
+            subject=entity_subject,
             action="a clear, purposeful action",
-            scene="a clean cinematic environment",
+            scene=entity_scene,
             lighting=lighting,
             color_palette=palette,
             prompt="",
             negative_prompt=brief.negative_prompt,
             transition=transition,
             remake_notes="Mock 方案仅用于流程演示，配置文本模型后可生成真实创意。",
+            source_shot_index=source_shot_index,
         )
-        shot.prompt = _compose_prompt(shot, brief)
+        shot.prompt = _compose_prompt(shot, brief, global_style)
         shots.append(shot)
 
     return PromptPlan(
@@ -251,8 +343,160 @@ def mock_prompt_plan(brief: PromptBrief) -> PromptPlan:
         language=brief.language,
         duration_s=brief.duration_s,
         aspect_ratio=brief.aspect_ratio,
-        global_style=brief.style or "cinematic natural style",
+        global_style=global_style,
+        target_profile=get_model_profile(brief.target_model),
         shots=shots,
         assumptions=["Mock 模式不调用模型，结果仅用于流程演示。"],
         warnings=["Mock 模式：未调用文本模型"],
     )
+
+
+def _reference_style(reference: ReferenceContext | None) -> str:
+    if reference is None:
+        return ""
+    return next(
+        (shot.visual_style for shot in reference.recipe.shots if shot.visual_style),
+        "",
+    )
+
+
+def _clean_locked_fields(fields: list[str] | None) -> list[str]:
+    return list(dict.fromkeys(field for field in (fields or []) if field in _LOCKABLE_FIELDS))
+
+
+def _entity_subject(brief: PromptBrief) -> str:
+    bible = brief.entity_bible
+    for item in [*bible.products, *bible.characters]:
+        detail = item.appearance or item.description
+        return f"{item.name}, {detail}" if detail else item.name
+    return "the product or protagonist"
+
+
+def _entity_scene(brief: PromptBrief) -> str:
+    bible = brief.entity_bible
+    if bible.scenes:
+        item = bible.scenes[0]
+        detail = item.appearance or item.description
+        return f"{item.name}, {detail}" if detail else item.name
+    return "a clean cinematic environment"
+
+
+def _entity_context(brief: PromptBrief) -> str:
+    payload = brief.entity_bible.model_dump(mode="json")
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def regenerate_prompt_shot(
+    project: PromptProject,
+    shot_index: int,
+    settings: Settings,
+) -> tuple[PromptPlan, dict]:
+    brief = PromptBrief.model_validate(project.brief_json or {})
+    plan = PromptPlan.model_validate(project.plan_json or {})
+    reference = (
+        ReferenceContext.model_validate(project.reference_snapshot_json)
+        if project.reference_snapshot_json
+        else None
+    )
+    current = next(
+        (shot for shot in plan.shots if shot.index == shot_index),
+        None,
+    )
+    if current is None:
+        raise ValueError("镜头不存在")
+
+    locked = set(_clean_locked_fields(current.locked_fields))
+    gateway = LLMGateway(settings)
+    candidate = None
+    notes: list[str] = []
+    if gateway.enabled and "prompt" not in locked:
+        candidate = _model_regenerate_shot(brief, current, gateway, reference)
+        if candidate is not None:
+            notes.append("单镜已由文本模型重生成")
+    if candidate is None:
+        candidate = _local_regenerate_shot(brief, current, locked)
+        notes.append("单镜已局部重生成")
+
+    merged = current.model_copy(deep=True)
+    for field in _LOCKABLE_FIELDS - locked:
+        if hasattr(candidate, field):
+            setattr(merged, field, getattr(candidate, field))
+    for field in locked:
+        setattr(merged, field, getattr(current, field))
+    merged.index = current.index
+    merged.start_s = current.start_s
+    merged.end_s = current.end_s
+    merged.duration = current.duration
+    merged.source_shot_index = current.source_shot_index
+    merged.locked_fields = list(locked)
+    if not merged.prompt.strip():
+        merged.prompt = _compose_prompt(merged, brief, plan.global_style)
+
+    plan.shots = [
+        merged if shot.index == shot_index else shot for shot in plan.shots
+    ]
+    plan.warnings = list(dict.fromkeys([*plan.warnings, *notes]))
+    plan.generated_at = datetime.now(timezone.utc)
+    return plan, gateway.stats()
+
+
+def _model_regenerate_shot(
+    brief: PromptBrief,
+    current: PromptShot,
+    gateway: LLMGateway,
+    reference: ReferenceContext | None,
+) -> PromptShot | None:
+    llm = gateway.chat_model()
+    if llm is None:
+        return None
+    prompt = (
+        "只重写下面这一个镜头，保持整体创意与镜头时间轴不变。"
+        "返回完整 PromptShot 对象，不要修改 index、start_s、end_s、duration。\n\n"
+        f"创意简报：\n{_brief_text(brief, reference)}\n\n"
+        f"Entity Bible：\n{_entity_context(brief)}\n\n"
+        f"当前镜头：\n{json.dumps(current.model_dump(mode='json'), ensure_ascii=False, indent=2)}"
+    )
+    try:
+        structured = llm.with_structured_output(PromptShot, include_raw=True)
+        result = structured.invoke(
+            [
+                SystemMessage(content=load_prompt("video_prompt_generation")),
+                HumanMessage(content=prompt),
+            ]
+        )
+        raw = result.get("raw") if isinstance(result, dict) else None
+        if raw is not None:
+            gateway.record_usage(raw)
+        return result.get("parsed") if isinstance(result, dict) else None
+    except Exception as exc:
+        logger.warning("single shot regeneration failed: %s", exc)
+        return None
+
+
+def _local_regenerate_shot(
+    brief: PromptBrief,
+    current: PromptShot,
+    locked: set[str],
+) -> PromptShot:
+    candidate = current.model_copy(deep=True)
+    seed = int(
+        hashlib.sha1(f"{current.prompt}:{uuid.uuid4().hex}".encode("utf-8")).hexdigest()[:8],
+        16,
+    )
+    if "shot_type" not in locked:
+        candidate.shot_type = _SHOT_TYPES[seed % len(_SHOT_TYPES)]
+    if "camera_movement" not in locked:
+        candidate.camera_movement = _MOVES[(seed // 3) % len(_MOVES)]
+    if "lighting" not in locked:
+        candidate.lighting = _LIGHTING[(seed // 5) % len(_LIGHTING)]
+    if "transition" not in locked:
+        candidate.transition = _TRANSITIONS[(seed // 7) % len(_TRANSITIONS)]
+    if "color_palette" not in locked:
+        candidate.color_palette = _PALETTES[(seed // 11) % len(_PALETTES)]
+    if "prompt" not in locked:
+        candidate.prompt = _compose_prompt(
+            candidate,
+            brief,
+            brief.style or "cinematic natural style",
+        )
+    return candidate
