@@ -27,50 +27,14 @@ const PROMPT_STEP_HINTS = {
   cancelled: "已取消",
 };
 
-const p$ = (selector, root = document) => root.querySelector(selector);
-
-function pEsc(value) {
-  return String(value ?? "").replace(/[&<>"']/g, (character) => {
-    return {
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;",
-    }[character];
-  });
-}
-
-function pToast(message) {
-  const element = p$("#toast");
-  if (!element) return;
-  element.textContent = message;
-  element.classList.remove("hidden");
-  clearTimeout(pToast.timer);
-  pToast.timer = setTimeout(() => element.classList.add("hidden"), 3200);
-}
-
-async function pApi(url, options) {
-  const response = await fetch(url, options);
-  if (!response.ok) {
-    let detail = response.statusText;
-    try {
-      const data = await response.json();
-      detail = data.detail || detail;
-    } catch (_) {
-      /* ignore */
-    }
-    throw new Error(detail);
-  }
-  return response.json();
-}
-
-function pClock(value) {
-  const total = Math.max(0, Number(value || 0));
-  const minutes = Math.floor(total / 60);
-  const seconds = total - minutes * 60;
-  return String(minutes).padStart(2, "0") + ":" + seconds.toFixed(1).padStart(4, "0");
-}
+const {
+  $: p$,
+  esc: pEsc,
+  toast: pToast,
+  api: pApi,
+  copyText,
+  formatClock: pClock,
+} = window.ReelReverse;
 
 function referencePaletteMarkup(colors) {
   return (colors || [])
@@ -1018,28 +982,6 @@ async function saveEntityBible(form) {
   } finally {
     if (button) button.disabled = false;
   }
-}
-
-async function copyText(text) {
-  if (!text) return false;
-  if (navigator.clipboard && window.isSecureContext) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch (_) {
-      /* fall through */
-    }
-  }
-  const area = document.createElement("textarea");
-  area.value = text;
-  area.setAttribute("readonly", "");
-  area.style.position = "fixed";
-  area.style.opacity = "0";
-  document.body.appendChild(area);
-  area.select();
-  const copied = document.execCommand("copy");
-  area.remove();
-  return copied;
 }
 
 async function regeneratePromptProject(id) {

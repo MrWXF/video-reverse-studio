@@ -1,9 +1,11 @@
 import logging
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.openapi.utils import get_openapi
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
@@ -14,13 +16,16 @@ from .api.share_routes import router as share_router
 from .config import PROJECT_ROOT, get_settings
 from .db import SessionLocal, init_db
 from .models import Job, PromptProject
+from .observability import (
+    RequestContextMiddleware,
+    configure_logging,
+    current_request_id,
+)
 from .security import BasicAuthMiddleware
+from .services.redaction import redact_exception
 
 settings = get_settings()
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
+configure_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -56,10 +61,19 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title=settings.app_name,
+    version="0.2.0",
+    lifespan=lifespan,
+    description=(
+        "视频逆向与提示词生成工作台。`/api` 为兼容入口，`/api/v1` 为正式版本入口；"
+        "两个入口共享同一套 v1 语义。"
+    ),
+)
 app.add_middleware(BasicAuthMiddleware)
-app.include_router(router)
-app.include_router(prompt_router)
+app.add_middleware(RequestContextMiddleware)
+app.include_router(router, tags=["video-analysis"])
+app.include_router(prompt_router, tags=["prompt-studio"])
 app.include_router(share_router)
 app.mount(
     "/static",
@@ -67,6 +81,51 @@ app.mount(
     name="static",
 )
 templates = Jinja2Templates(directory=str(PROJECT_ROOT / "app" / "templates"))
+
+
+def custom_openapi() -> dict:
+    """Expose the same v1 operations under both /api and /api/v1 in docs."""
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    paths = dict(schema.get("paths", {}))
+    for path, operations in list(paths.items()):
+        if not path.startswith("/api/"):
+            continue
+        versioned_path = "/api/v1" + path[len("/api") :]
+        versioned = deepcopy(operations)
+        for operation in versioned.values():
+            if not isinstance(operation, dict):
+                continue
+            operation_id = operation.get("operationId")
+            if operation_id:
+                operation["operationId"] = f"{operation_id}_v1"
+            operation["tags"] = ["API v1"]
+        paths[versioned_path] = versioned
+    schema["paths"] = paths
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = custom_openapi
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("unhandled request error path=%s", request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "服务器内部错误",
+            "request_id": current_request_id(),
+            "error": redact_exception(exc, settings, limit=500),
+        },
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -77,6 +136,7 @@ def index(request: Request):
         else settings.llm_provider
     )
     return templates.TemplateResponse(
+        request,
         "index.html",
         {"request": request, "app_name": settings.app_name, "mode": mode},
     )

@@ -6,7 +6,6 @@ from starlette.responses import Response
 
 from .config import get_settings
 
-
 _UNAUTHORIZED_HEADERS = {
     "WWW-Authenticate": 'Basic realm="ReelReverse", charset="UTF-8"',
     "Cache-Control": "no-store",

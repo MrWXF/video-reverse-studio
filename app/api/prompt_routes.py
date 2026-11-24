@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session, selectinload
 from ..config import get_settings
 from ..db import get_db
 from ..models import DeliveryReview, Project, PromptProject, PromptShare, PromptVersion
+from ..observability import current_request_id
 from ..schemas import EntityBible, PromptBrief, PromptPlan, PromptShotUpdate, ShareCreate
 from ..serializers import (
     prompt_project_payload,
@@ -29,6 +30,7 @@ from ..serializers import (
     share_payload,
 )
 from ..services import (
+    capacity,
     comparison,
     delivery_review,
     delivery_zip,
@@ -37,11 +39,12 @@ from ..services import (
     prompt_generation,
     prompt_versions,
     sse,
+    uploads,
 )
 from ..services.reference import build_reference_context
 
 router = APIRouter()
-REVIEW_SUFFIXES = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"}
+REVIEW_SUFFIXES = uploads.VIDEO_SUFFIXES
 
 
 def _get_project(db: Session, project_id: str) -> PromptProject:
@@ -60,12 +63,28 @@ def _get_done_plan(project: PromptProject) -> PromptPlan:
         raise HTTPException(status_code=500, detail="提示词方案数据损坏") from exc
 
 
-@router.post("/api/prompt-projects", status_code=201)
+@router.post(
+    "/api/prompt-projects",
+    status_code=201,
+    summary="创建提示词生成项目",
+    description=(
+        "根据创意简报生成逐镜视频提示词，可关联已完成的逆向项目作为风格或结构参考。"
+    ),
+    responses={
+        201: {"description": "提示词项目已创建并开始生成"},
+        409: {"description": "参考项目尚未完成分析"},
+        503: {"description": "当前并发任务已达上限"},
+    },
+)
 def create_prompt_project(
     brief: PromptBrief,
+    request: Request,
     background: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> dict:
+    settings = get_settings()
+    if not capacity.has_capacity(settings.max_active_jobs):
+        raise HTTPException(status_code=503, detail="当前生成任务已达并发上限，请稍后重试")
     reference = None
     if brief.reference_project_id:
         source = db.scalar(
@@ -81,7 +100,7 @@ def create_prompt_project(
 
     project = PromptProject(
         id=str(uuid.uuid4()),
-        title=brief.title.strip() or brief.idea[:60],
+        title=uploads.clean_text(brief.title, default=brief.idea[:60], limit=200),
         source_project_id=brief.reference_project_id,
         reference_mode=brief.reference_mode,
         reference_snapshot_json=reference.model_dump(mode="json") if reference else {},
@@ -92,7 +111,11 @@ def create_prompt_project(
     )
     db.add(project)
     db.commit()
-    background.add_task(prompt_generation.run_prompt_generation, project.id)
+    background.add_task(
+        prompt_generation.run_prompt_generation,
+        project.id,
+        request_id=current_request_id(),
+    )
     return {"prompt_project_id": project.id, "status": "queued"}
 
 
@@ -247,9 +270,13 @@ def get_prompt_project(project_id: str, db: Session = Depends(get_db)) -> dict:
 @router.post("/api/prompt-projects/{project_id}/regenerate", status_code=202)
 def regenerate_prompt_project(
     project_id: str,
+    request: Request,
     background: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> dict:
+    settings = get_settings()
+    if not capacity.has_capacity(settings.max_active_jobs):
+        raise HTTPException(status_code=503, detail="当前生成任务已达并发上限，请稍后重试")
     project = _get_project(db, project_id)
     if project.status in {"queued", "running"}:
         raise HTTPException(status_code=409, detail="该提示词项目正在生成")
@@ -260,7 +287,11 @@ def regenerate_prompt_project(
     project.error = ""
     project.plan_json = {}
     db.commit()
-    background.add_task(prompt_generation.run_prompt_generation, project.id)
+    background.add_task(
+        prompt_generation.run_prompt_generation,
+        project.id,
+        request_id=current_request_id(),
+    )
     return {"prompt_project_id": project.id, "status": "queued"}
 
 
@@ -300,40 +331,49 @@ def list_model_profiles() -> list[dict]:
     return model_profiles.model_profile_options()
 
 
-@router.post("/api/prompt-projects/{project_id}/reviews", status_code=202)
+@router.post(
+    "/api/prompt-projects/{project_id}/reviews",
+    status_code=202,
+    summary="上传成片并回测",
+    description="将已生成视频按镜头时长、画幅和主色与提示词方案进行结构一致性回测。",
+    responses={
+        202: {"description": "回测任务已创建"},
+        400: {"description": "格式或文件内容不合法"},
+        413: {"description": "文件超过大小限制"},
+    },
+)
 def create_delivery_review(
     project_id: str,
+    request: Request,
     background: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> dict:
+    settings = get_settings()
+    if not capacity.has_capacity(settings.max_active_jobs):
+        raise HTTPException(status_code=503, detail="当前任务已达并发上限，请稍后重试")
     project = _get_project(db, project_id)
     _get_done_plan(project)
-    suffix = Path(file.filename or "").suffix.lower()
+    original_name = uploads.safe_filename(file.filename or "")
+    suffix = Path(original_name).suffix.lower()
     if suffix not in REVIEW_SUFFIXES:
         raise HTTPException(status_code=400, detail=f"不支持的视频格式：{suffix or '未知'}")
-    settings = get_settings()
     review_id = str(uuid.uuid4())
     root = settings.data_dir / "reviews" / review_id
     root.mkdir(parents=True, exist_ok=True)
     target = root / f"delivery{suffix}"
     limit = settings.max_upload_mb * 1024 * 1024
-    written = 0
     try:
-        with target.open("wb") as handle:
-            while True:
-                chunk = file.file.read(1024 * 1024)
-                if not chunk:
-                    break
-                written += len(chunk)
-                if written > limit:
-                    raise HTTPException(
-                        status_code=413,
-                        detail=f"文件超过 {settings.max_upload_mb}MB 限制",
-                    )
-                handle.write(chunk)
-        if written == 0:
-            raise HTTPException(status_code=400, detail="上传的文件为空")
+        uploads.save_validated_upload(file, target, limit)
+    except uploads.UploadTooLargeError as exc:
+        shutil.rmtree(root, ignore_errors=True)
+        raise HTTPException(
+            status_code=413,
+            detail=f"文件超过 {settings.max_upload_mb}MB 限制",
+        ) from exc
+    except uploads.UploadValidationError as exc:
+        shutil.rmtree(root, ignore_errors=True)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception:
         shutil.rmtree(root, ignore_errors=True)
         raise
@@ -341,14 +381,18 @@ def create_delivery_review(
     review = DeliveryReview(
         id=review_id,
         prompt_project_id=project.id,
-        filename=file.filename or target.name,
+        filename=original_name or target.name,
         source_path=str(target),
         status="queued",
         step="queued",
     )
     db.add(review)
     db.commit()
-    background.add_task(delivery_review.run_delivery_review, review.id)
+    background.add_task(
+        delivery_review.run_delivery_review,
+        review.id,
+        request_id=current_request_id(),
+    )
     return review_payload(review)
 
 

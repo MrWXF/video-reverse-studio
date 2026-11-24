@@ -1,15 +1,23 @@
+"""Video analysis pipeline with bounded retries and concurrency."""
+
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sqlalchemy.orm import Session
+
 from ..config import Settings, get_settings
 from ..db import SessionLocal
 from ..models import Job, Project, Shot
+from ..observability import current_request_id, request_id_ctx
 from ..schemas import ShotAnalysis
-from . import asr, fusion, media, vision
+from . import asr, capacity, fusion, media, vision
 from . import recipe as recipe_service
 from .llm import LLMGateway
+from .redaction import redact_exception
+from .retry import is_retryable_exception, retry_delay
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +32,7 @@ def project_dir(project_id: str, settings: Settings | None = None) -> Path:
 
 
 def _update_job(
-    db,
+    db: Session,
     job: Job,
     *,
     status: str | None = None,
@@ -44,34 +52,97 @@ def _update_job(
     db.commit()
 
 
-def run_pipeline(project_id: str, job_id: str) -> None:
+def run_pipeline(
+    project_id: str,
+    job_id: str,
+    request_id: str | None = None,
+) -> None:
+    """Run the reverse-analysis job with admission control and retries."""
     settings = get_settings()
-    with SessionLocal() as db:
-        project = db.get(Project, project_id)
-        job = db.get(Job, job_id)
-        if project is None or job is None:
-            logger.error("project or job missing: %s / %s", project_id, job_id)
-            return
-        try:
-            _execute(db, project, job, settings)
-        except JobCancelled:
-            project.status = "cancelled"
-            job.status = "cancelled"
-            job.step = "cancelled"
-            job.error = "用户已取消任务"
-            job.updated_at = datetime.now(timezone.utc)
-            db.commit()
-        except Exception as exc:
-            logger.exception("pipeline failed for project %s", project_id)
-            project.status = "failed"
-            job.status = "failed"
-            job.step = "failed"
-            job.error = str(exc)[:2000]
-            job.updated_at = datetime.now(timezone.utc)
-            db.commit()
+    trace_id = request_id or f"job-{job_id}"
+    token = request_id_ctx.set(trace_id)
+    try:
+        with SessionLocal() as db:
+            project = db.get(Project, project_id)
+            job = db.get(Job, job_id)
+            if project is None or job is None:
+                logger.error("project or job missing: %s / %s", project_id, job_id)
+                return
+            if not capacity.acquire_job(settings.max_active_jobs):
+                project.status = "failed"
+                job.status = "failed"
+                job.step = "failed"
+                job.error = "系统繁忙，当前并发分析任务已达上限，请稍后重试"
+                job.updated_at = datetime.now(timezone.utc)
+                db.commit()
+                return
+            try:
+                attempt = 1
+                while True:
+                    try:
+                        _execute(db, project, job, settings)
+                        break
+                    except JobCancelled:
+                        db.rollback()
+                        project.status = "cancelled"
+                        job.status = "cancelled"
+                        job.step = "cancelled"
+                        job.error = "用户已取消任务"
+                        job.updated_at = datetime.now(timezone.utc)
+                        db.commit()
+                        break
+                    except Exception as exc:
+                        db.rollback()
+                        project = db.get(Project, project_id)
+                        job = db.get(Job, job_id)
+                        if project is None or job is None:
+                            logger.error("project or job disappeared during retry")
+                            break
+                        if job.status == "cancelled" or project.status == "cancelled":
+                            job.status = "cancelled"
+                            job.step = "cancelled"
+                            job.error = "用户已取消任务"
+                            job.updated_at = datetime.now(timezone.utc)
+                            db.commit()
+                            break
+                        retryable = is_retryable_exception(exc)
+                        if retryable and attempt < settings.retry_max_attempts:
+                            delay = retry_delay(
+                                attempt,
+                                settings.retry_base_delay_s,
+                                settings.retry_max_delay_s,
+                            )
+                            logger.warning(
+                                "pipeline transient failure project=%s attempt=%s delay=%.2fs",
+                                project_id,
+                                attempt,
+                                delay,
+                            )
+                            job.status = "running"
+                            job.step = "retrying"
+                            job.error = redact_exception(exc, settings, limit=500)
+                            job.updated_at = datetime.now(timezone.utc)
+                            db.commit()
+                            time.sleep(delay)
+                            attempt += 1
+                            continue
+
+                        logger.exception("pipeline failed for project %s", project_id)
+                        project.status = "failed"
+                        job.status = "failed"
+                        job.step = "failed"
+                        job.error = redact_exception(exc, settings)
+                        job.updated_at = datetime.now(timezone.utc)
+                        db.commit()
+                        break
+            finally:
+                capacity.release_job()
+    finally:
+        request_id_ctx.reset(token)
 
 
-def _execute(db, project: Project, job: Job, settings: Settings) -> None:
+def _execute(db: Session, project: Project, job: Job, settings: Settings) -> None:
+    """Perform one full analysis attempt. The operation is idempotent."""
     root = project_dir(project.id, settings)
     source = Path(project.source_path)
     if not source.exists():
@@ -170,13 +241,17 @@ def _execute(db, project: Project, job: Job, settings: Settings) -> None:
         recipe_service.render_json(recipe), encoding="utf-8"
     )
 
-    job.metrics = gateway.stats()
+    job.metrics = {
+        **gateway.stats(),
+        "request_id": current_request_id(),
+    }
     _update_job(db, job, status="done", step="done", progress=1.0, error="")
     project.status = "done"
     db.commit()
 
 
-def _check_cancelled(db, job: Job) -> None:
+def _check_cancelled(db: Session, job: Job) -> None:
+    """Raise when the user cancelled the job from another request."""
     db.refresh(job)
     if job.status == "cancelled":
         raise JobCancelled()
@@ -185,6 +260,7 @@ def _check_cancelled(db, job: Job) -> None:
 def _transcribe(
     root: Path, source: Path, ffmpeg: str, settings: Settings
 ) -> list[dict]:
+    """Optionally transcribe audio; ASR failure must not fail the whole job."""
     if settings.asr_provider.lower().strip() in ("", "none"):
         return []
     audio_path = root / "audio.wav"
@@ -201,11 +277,12 @@ def _analyze_shots(
     keyframes: list[Path],
     segments: list[tuple[float, float]],
     transcripts: list[dict],
-    meta,
+    meta: media.VideoMeta,
     settings: Settings,
-    db,
+    db: Session,
     job: Job,
 ) -> list[ShotAnalysis]:
+    """Analyze keyframes concurrently while preserving timeline order."""
     results: list[ShotAnalysis] = []
 
     def work(index: int) -> ShotAnalysis:

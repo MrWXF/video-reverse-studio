@@ -7,8 +7,11 @@ from pathlib import Path
 from ..config import get_settings
 from ..db import SessionLocal
 from ..models import DeliveryReview, PromptProject
+from ..observability import request_id_ctx
 from ..schemas import PromptPlan
-from . import media
+from . import capacity, media
+from .redaction import redact_exception
+from .retry import retry_call
 
 logger = logging.getLogger(__name__)
 
@@ -34,38 +37,59 @@ def _update_review(
     db.commit()
 
 
-def run_delivery_review(review_id: str) -> None:
+def run_delivery_review(review_id: str, request_id: str | None = None) -> None:
+    """Evaluate a delivered video against its prompt plan."""
     settings = get_settings()
-    with SessionLocal() as db:
-        review = db.get(DeliveryReview, review_id)
-        if review is None:
-            return
-        project = db.get(PromptProject, review.prompt_project_id)
-        if project is None:
-            review.status = "failed"
-            review.error = "提示词方案不存在"
-            db.commit()
-            return
-        try:
-            plan = PromptPlan.model_validate(project.plan_json or {})
-            _update_review(db, review, status="running", step="probing", progress=0.08)
-            result = evaluate_delivery(Path(review.source_path), plan, settings)
-            review.result_json = result
-            _update_review(
-                db,
-                review,
-                status="done",
-                step="done",
-                progress=1.0,
-                error="",
-            )
-        except Exception as exc:
-            logger.exception("delivery review failed: %s", review_id)
-            review.status = "failed"
-            review.step = "failed"
-            review.error = str(exc)[:2000]
-            review.updated_at = datetime.now(timezone.utc)
-            db.commit()
+    token = request_id_ctx.set(request_id or f"review-{review_id}")
+    try:
+        with SessionLocal() as db:
+            review = db.get(DeliveryReview, review_id)
+            if review is None:
+                return
+            if not capacity.acquire_job(settings.max_active_jobs):
+                review.status = "failed"
+                review.step = "failed"
+                review.error = "系统繁忙，当前回测任务已达并发上限，请稍后重试"
+                review.updated_at = datetime.now(timezone.utc)
+                db.commit()
+                return
+            try:
+                project = db.get(PromptProject, review.prompt_project_id)
+                if project is None:
+                    review.status = "failed"
+                    review.error = "提示词方案不存在"
+                    db.commit()
+                    return
+                plan = PromptPlan.model_validate(project.plan_json or {})
+                _update_review(
+                    db, review, status="running", step="probing", progress=0.08
+                )
+                result = retry_call(
+                    lambda: evaluate_delivery(Path(review.source_path), plan, settings),
+                    attempts=settings.retry_max_attempts,
+                    base_delay=settings.retry_base_delay_s,
+                    max_delay=settings.retry_max_delay_s,
+                )
+                review.result_json = result
+                _update_review(
+                    db,
+                    review,
+                    status="done",
+                    step="done",
+                    progress=1.0,
+                    error="",
+                )
+            except Exception as exc:
+                logger.exception("delivery review failed: %s", review_id)
+                review.status = "failed"
+                review.step = "failed"
+                review.error = redact_exception(exc, settings)
+                review.updated_at = datetime.now(timezone.utc)
+                db.commit()
+            finally:
+                capacity.release_job()
+    finally:
+        request_id_ctx.reset(token)
 
 
 def evaluate_delivery(path: Path, plan: PromptPlan, settings) -> dict:
@@ -243,7 +267,12 @@ def _nearest_palette_score(color: str, palette: list[str]) -> float:
     if not candidates:
         return 0.0
     closest = min(
-        math.sqrt(sum((left - right) ** 2 for left, right in zip(actual, candidate)))
+        math.sqrt(
+            sum(
+                (left - right) ** 2
+                for left, right in zip(actual, candidate, strict=False)
+            )
+        )
         for candidate in candidates
     )
     return max(0.0, 1.0 - closest / math.sqrt(3 * 255**2))

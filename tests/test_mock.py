@@ -1,5 +1,7 @@
+import pytest
+
 from app.schemas import ShotAnalysis
-from app.services.mock import mock_analysis
+from app.services.mock import MockScenarioError, mock_analysis
 
 
 def test_mock_is_deterministic():
@@ -13,3 +15,15 @@ def test_mock_returns_valid_analysis():
     assert result.origin in {"filmed", "ai_generated", "code_generated"}
     assert result.prompt
     assert result.evidence
+
+
+def test_mock_uses_transcript_and_supports_failure_scenarios():
+    first = mock_analysis(1, 0.0, 2.0, "咖啡机开始萃取")
+    second = mock_analysis(1, 0.0, 2.0, "人物推门进入")
+
+    assert first.prompt != second.prompt
+    assert "咖啡机开始萃取" in first.prompt
+    with pytest.raises(MockScenarioError):
+        mock_analysis(1, 0.0, 2.0, scenario="fail")
+    with pytest.raises(MockScenarioError):
+        mock_analysis(2, 0.0, 2.0, scenario="fail_shot", fail_shot=2)

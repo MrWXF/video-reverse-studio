@@ -1,32 +1,65 @@
 import hashlib
+import time
 
+from ..prompts import load_catalog
 from ..schemas import ShotAnalysis
 
-_SHOT_TYPES = ["远景", "全景", "中景", "近景", "特写"]
-_MOVES = ["固定", "缓慢推镜", "横移", "手持跟随", "环绕"]
-_PALETTES = [
-    ["#0f172a", "#38bdf8", "#e2e8f0"],
-    ["#1c1917", "#f59e0b", "#fef3c7"],
-    ["#052e16", "#22c55e", "#dcfce7"],
-    ["#3b0764", "#a855f7", "#f3e8ff"],
-]
-_SUBJECTS = ["人物", "产品", "街景", "手部特写", "自然景观"]
-_SCENES = ["室内", "城市街道", "自然户外", "纯色背景棚拍", "夜景"]
-_STYLES = ["写实电影感", "广告质感", "纪录片", "赛博朋克", "极简"]
-_ORIGINS = ["filmed", "ai_generated", "code_generated"]
+
+class MockScenarioError(RuntimeError):
+    """Raised when a configured mock failure scenario is requested."""
 
 
-def mock_analysis(index: int, start_s: float, end_s: float, transcript: str = "") -> ShotAnalysis:
-    seed_text = f"{index}:{start_s:.2f}:{end_s:.2f}"
+def _pick(values: list, seed: int):
+    return values[seed % len(values)]
+
+
+def mock_analysis(
+    index: int,
+    start_s: float,
+    end_s: float,
+    transcript: str = "",
+    *,
+    scenario: str = "success",
+    fail_shot: int = 0,
+    catalog_path: str = "",
+) -> ShotAnalysis:
+    """Build a deterministic mock analysis from shot timing and transcript.
+
+    ``MOCK_SCENARIO=fail`` fails every call. ``MOCK_SCENARIO=fail_shot`` fails
+    when ``index`` reaches ``MOCK_FAIL_SHOT``. ``slow`` adds a short delay so
+    cancellation and SSE behavior can be exercised without a real provider.
+    """
+    scenario = (scenario or "success").lower().strip()
+    if scenario == "fail" or (scenario == "fail_shot" and fail_shot and index >= fail_shot):
+        raise MockScenarioError(f"Mock 已按配置模拟镜头 {index} 失败")
+    if scenario == "slow":
+        time.sleep(0.05)
+
+    catalog = load_catalog(catalog_path)
+    transcript = (transcript or "").strip()
+    seed_text = f"{index}:{start_s:.2f}:{end_s:.2f}:{transcript}"
     seed = int(hashlib.sha1(seed_text.encode("utf-8")).hexdigest()[:8], 16)
-    shot_type = _SHOT_TYPES[seed % len(_SHOT_TYPES)]
-    move = _MOVES[(seed // 7) % len(_MOVES)]
-    palette = _PALETTES[(seed // 11) % len(_PALETTES)]
-    origin = _ORIGINS[(seed // 13) % len(_ORIGINS)]
+    shot_type = _pick(catalog["shot_types"], seed)
+    move = _pick(catalog["camera_moves"], seed // 7)
+    palette = _pick(catalog["palettes"], seed // 11)
+    origin = _pick(catalog["origins"], seed // 13)
     confidence = round(0.55 + (seed % 35) / 100, 2)
-    subject = _SUBJECTS[(seed // 17) % len(_SUBJECTS)]
-    scene = _SCENES[(seed // 19) % len(_SCENES)]
-    style = _STYLES[(seed // 23) % len(_STYLES)]
+    subject = _pick(catalog["subjects"], seed // 17)
+    scene = _pick(catalog["scenes"], seed // 19)
+    style = _pick(catalog["styles"], seed // 23)
+    evidence = [
+        "Mock 模式：未调用视觉模型",
+        f"镜头时长 {max(0.0, end_s - start_s):.1f}s，运动强度由模拟规则生成",
+    ]
+    if transcript:
+        evidence.append(f"已纳入台词特征：{transcript[:100]}")
+    prompt = (
+        f"{style} {shot_type} of {subject} in {scene}, {move}, "
+        f"cinematic lighting, shallow depth of field, 35mm lens, "
+        f"color palette {', '.join(palette)}, 24fps"
+    )
+    if transcript:
+        prompt += f", dialogue context: {transcript[:120]}"
     return ShotAnalysis(
         shot_type=shot_type,
         camera_movement=move,
@@ -37,14 +70,9 @@ def mock_analysis(index: int, start_s: float, end_s: float, transcript: str = ""
         color_palette=palette,
         origin=origin,
         confidence=confidence,
-        evidence=[
-            "Mock 模式：未调用视觉模型",
-            f"镜头时长 {max(0.0, end_s - start_s):.1f}s，运动强度由模拟规则生成",
-        ],
-        prompt=(
-            f"{style} {shot_type} of {subject} in {scene}, {move}, "
-            f"cinematic lighting, shallow depth of field, 35mm lens, "
-            f"color palette {', '.join(palette)}, 24fps"
+        evidence=evidence,
+        prompt=prompt,
+        remake_notes=(
+            "Mock 结果仅用于流程演示，配置视觉模型后重新分析可获得真实判断。"
         ),
-        remake_notes="Mock 结果仅用于流程演示，配置视觉模型后重新分析可获得真实判断。",
     )

@@ -26,9 +26,10 @@ from sqlalchemy.orm import Session, selectinload
 from ..config import Settings, get_settings
 from ..db import get_db
 from ..models import Job, Project, PromptProject, Shot
+from ..observability import current_request_id
 from ..schemas import ShotAnalysis, ShotAnalysisUpdate
 from ..serializers import job_payload, project_payload, shot_payload
-from ..services import media, pipeline, sse
+from ..services import capacity, media, pipeline, sse, uploads
 from ..services.reference import (
     aspect_ratio_for,
     build_reference_context,
@@ -36,7 +37,7 @@ from ..services.reference import (
 )
 
 router = APIRouter()
-ALLOWED_SUFFIXES = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"}
+ALLOWED_SUFFIXES = uploads.VIDEO_SUFFIXES
 
 
 def _project_media_path(project_id: str, stored_path: str, settings: Settings) -> Path:
@@ -59,18 +60,39 @@ def healthz() -> dict:
         "llm_enabled": bool(settings.llm_api_key) and settings.llm_provider.lower() != "mock",
         "ffmpeg": bool(media.resolve_ffmpeg(settings.ffmpeg_bin)),
         "ffprobe": bool(media.resolve_ffprobe(settings.ffprobe_bin)),
+        "api_version": "v1",
+        "active_jobs": capacity.active_jobs(),
     }
 
 
-@router.post("/api/projects", status_code=201)
+@router.post(
+    "/api/projects",
+    status_code=201,
+    summary="创建视频逆向项目",
+    description=(
+        "上传视频并启动分镜检测、关键帧抽取和逐镜分析。"
+        "支持 MP4、MOV、WebM、MKV、AVI、M4V，服务端会校验文件头。"
+    ),
+    responses={
+        201: {"description": "项目与分析任务已创建"},
+        400: {"description": "格式或文件内容不合法"},
+        413: {"description": "文件超过大小限制"},
+        503: {"description": "当前并发任务已达上限"},
+    },
+)
 def create_project(
+    request: Request,
     background: BackgroundTasks,
     file: UploadFile = File(...),
     title: str = Form(""),
     db: Session = Depends(get_db),
 ) -> dict:
     settings = get_settings()
-    suffix = Path(file.filename or "").suffix.lower()
+    if not capacity.has_capacity(settings.max_active_jobs):
+        raise HTTPException(status_code=503, detail="当前分析任务已达并发上限，请稍后重试")
+
+    original_name = uploads.safe_filename(file.filename or "")
+    suffix = Path(original_name).suffix.lower()
     if suffix not in ALLOWED_SUFFIXES:
         raise HTTPException(
             status_code=400, detail=f"不支持的视频格式：{suffix or '未知'}"
@@ -81,37 +103,41 @@ def create_project(
     root.mkdir(parents=True, exist_ok=True)
     target = root / f"source{suffix}"
     limit = settings.max_upload_mb * 1024 * 1024
-    written = 0
 
     try:
-        with target.open("wb") as handle:
-            while True:
-                chunk = file.file.read(1024 * 1024)
-                if not chunk:
-                    break
-                written += len(chunk)
-                if written > limit:
-                    raise HTTPException(
-                        status_code=413,
-                        detail=f"文件超过 {settings.max_upload_mb}MB 限制",
-                    )
-                handle.write(chunk)
-        if written == 0:
-            raise HTTPException(status_code=400, detail="上传的文件为空")
+        uploads.save_validated_upload(file, target, limit)
+    except uploads.UploadTooLargeError as exc:
+        shutil.rmtree(root, ignore_errors=True)
+        raise HTTPException(
+            status_code=413,
+            detail=f"文件超过 {settings.max_upload_mb}MB 限制",
+        ) from exc
+    except uploads.UploadValidationError as exc:
+        shutil.rmtree(root, ignore_errors=True)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception:
         shutil.rmtree(root, ignore_errors=True)
         raise
 
     project = Project(
         id=project_id,
-        title=title.strip() or Path(file.filename or "未命名").stem,
+        title=uploads.clean_text(
+            title,
+            default=Path(original_name).stem or "未命名项目",
+            limit=200,
+        ),
         source_path=str(target),
         status="queued",
     )
     job = Job(id=str(uuid.uuid4()), project_id=project_id, status="queued", step="queued")
     db.add_all([project, job])
     db.commit()
-    background.add_task(pipeline.run_pipeline, project_id, job.id)
+    background.add_task(
+        pipeline.run_pipeline,
+        project_id,
+        job.id,
+        request_id=current_request_id(),
+    )
     return {"project_id": project_id, "job_id": job.id, "status": "queued"}
 
 
@@ -249,12 +275,21 @@ def update_shot_analysis(
     return shot_payload(shot)
 
 
-@router.post("/api/projects/{project_id}/analyze", status_code=202)
+@router.post(
+    "/api/projects/{project_id}/analyze",
+    status_code=202,
+    summary="重新分析项目",
+    responses={202: {"description": "任务已排队"}, 409: {"description": "已有任务进行中"}},
+)
 def reanalyze(
     project_id: str,
+    request: Request,
     background: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> dict:
+    settings = get_settings()
+    if not capacity.has_capacity(settings.max_active_jobs):
+        raise HTTPException(status_code=503, detail="当前分析任务已达并发上限，请稍后重试")
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -270,7 +305,12 @@ def reanalyze(
     project.status = "queued"
     db.add(job)
     db.commit()
-    background.add_task(pipeline.run_pipeline, project_id, job.id)
+    background.add_task(
+        pipeline.run_pipeline,
+        project_id,
+        job.id,
+        request_id=current_request_id(),
+    )
     return {"job_id": job.id, "status": "queued"}
 
 

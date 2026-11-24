@@ -1,7 +1,6 @@
 import io
 import zipfile
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -262,11 +261,21 @@ def test_delivery_review_scores_shots_and_palette(p2_client, monkeypatch, tmp_pa
 def test_review_upload_route_and_delete(p2_client, monkeypatch):
     client, _, _, _ = p2_client
     project_id = create_prompt(client)
-    monkeypatch.setattr(prompt_routes.delivery_review, "run_delivery_review", lambda review_id: None)
+    monkeypatch.setattr(
+        prompt_routes.delivery_review,
+        "run_delivery_review",
+        lambda review_id, request_id=None: None,
+    )
 
     response = client.post(
         f"/api/prompt-projects/{project_id}/reviews",
-        files={"file": ("delivery.mp4", b"fake-video", "video/mp4")},
+        files={
+            "file": (
+                "delivery.mp4",
+                b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + b"video",
+                "video/mp4",
+            )
+        },
     )
     assert response.status_code == 202
     review = response.json()

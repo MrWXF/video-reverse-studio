@@ -1,449 +1,478 @@
-# 系统架构：ReelReverse
+# ReelReverse 架构文档
 
 > 版本：v0.1  
-> 目标：单机可跑、模块可替换、后续能平滑升级为多租户服务
+> 更新日期：2026-11-24
 
-## 1. 架构目标
+## 1. 项目概述
 
-1. **可跑**：没有 API Key 也能完整演示。
-2. **可替换**：模型、ASR、存储、队列都能替换，不绑死供应商。
-3. **可观测**：每个任务的每一步都有状态、耗时、错误和 token 统计。
-4. **可扩展**：从单机后台任务平滑升级到任务队列和多租户。
-5. **低成本**：按镜头控制调用量，关键帧压缩，避免无上限消耗。
+**ReelReverse** 是一个视频逆向工作台，核心功能是将任意视频拆解为可复刻的制作配方。用户上传视频后，系统自动进行分镜检测、关键帧抽取、逐镜分析，最终生成结构化的 `VIDEO.md` 和 `video.json` 配方文件。
 
-## 2. 技术选型
+### 1.1 核心价值主张
 
-| 层 | 选型 | 理由 | 备选 |
-|----|------|------|------|
-| Web 框架 | FastAPI | 异步、类型友好、自带 OpenAPI | Flask |
-| LLM 编排 | LangChain 1.x + langchain-openai | 统一多供应商、结构化输出、LCEL | 直接 httpx |
-| 数据校验 | Pydantic v2 | 与 FastAPI / LangChain 结构化输出一致 | dataclass |
-| 数据库 | SQLAlchemy 2.0 + SQLite | 零运维，易迁移 Postgres | Postgres |
-| 模板 | Jinja2 | 服务端渲染，无前端构建链 | Next.js |
-| 前端 | 原生 JS + CSS | 零构建、部署简单 | React / Vue |
-| 媒体处理 | ffmpeg / ffprobe | 事实标准，场景检测零额外依赖 | PySceneDetect |
-| ASR | OpenAI 兼容接口 | 复用生态，可换本地 whisper | faster-whisper |
-| 任务 | FastAPI BackgroundTasks | MVP 最简单 | arq / Celery |
+- **结构化输出**：不是简单的视频摘要，而是逐镜可执行的配方
+- **来源判定**：自动判断镜头来源（实拍/AI生成/代码生成）
+- **Mock 模式**：无 API Key 也可演示完整流程
+- **私有部署**：支持完全本地化部署
 
-## 3. 系统上下文
+### 1.2 目标用户
 
-```mermaid
-flowchart TB
-    U[用户浏览器] -->|HTTP| API[FastAPI]
-    API --> DB[(SQLite)]
-    API --> FS[(本地文件系统)]
-    API --> PIPE[分析流水线]
-    PIPE --> FF[ffmpeg / ffprobe]
-    PIPE --> LLM[LangChain → Vision LLM]
-    PIPE --> ASR[ASR 服务 可选]
-    PIPE --> DB
-    PIPE --> FS
-```
+| 用户类型 | 核心场景 |
+|----------|----------|
+| 短视频编导 | 拆解爆款视频的节奏与镜头结构 |
+| AI 视频创作者 | 反推素材的提示词和镜头语言 |
+| 广告/影视前期 | 分析参考片的视觉方案 |
+| 品牌内容团队 | 拆解竞品素材，形成内部模板 |
 
-## 4. 分层架构
+---
 
-```mermaid
-flowchart TB
-    subgraph Presentation
-        UI[Jinja2 页面 + 原生 JS]
-    end
-    subgraph API
-        R[FastAPI Routers]
-    end
-    subgraph Application
-        P[Pipeline Orchestrator]
-        J[Job State Manager]
-    end
-    subgraph Domain
-        M[Media Service]
-        V[Vision Service]
-        A[ASR Service]
-        F[Fusion Service]
-        RP[Recipe Service]
-    end
-    subgraph Infrastructure
-        L[LLM Gateway]
-        S[Storage]
-        D[Database]
-    end
+## 2. 技术栈
 
-    UI --> R
-    R --> P
-    P --> J
-    P --> M
-    P --> V
-    P --> A
-    P --> F
-    P --> RP
-    V --> L
-    P --> S
-    P --> D
-```
+### 2.1 后端
 
-职责边界：
+| 组件 | 技术 | 版本要求 |
+|------|------|----------|
+| 运行时 | Python | ≥3.11 |
+| Web 框架 | FastAPI | ≥0.115 |
+| ORM | SQLAlchemy | ≥2.0 |
+| 数据验证 | Pydantic | ≥2.7 |
+| 配置管理 | pydantic-settings | ≥2.3 |
+| LLM 框架 | LangChain | ≥0.3 |
+| 模板引擎 | Jinja2 | ≥3.1 |
+| HTTP 客户端 | httpx | ≥0.27 |
+| 数据库 | SQLite（默认）/ PostgreSQL | - |
 
-- **API 层**：参数校验、文件接收、序列化，不写业务逻辑。
-- **Application 层**：编排流水线、推进任务状态、错误归类。
-- **Domain 层**：纯业务能力，不依赖 FastAPI。
-- **Infrastructure 层**：模型、数据库、文件、外部服务。
+### 2.2 多媒体处理
 
-## 5. 核心流水线
-
-```mermaid
-stateDiagram-v2
-    [*] --> queued
-    queued --> probing: 开始
-    probing --> segmenting: 元数据就绪
-    segmenting --> extracting: 分镜完成
-    extracting --> transcribing: 关键帧完成
-    transcribing --> analyzing: 转写完成/跳过
-    analyzing --> fusing: 逐镜分析完成
-    fusing --> rendering: 配方数据就绪
-    rendering --> done: 文件写入完成
-    probing --> failed: 媒体错误
-    segmenting --> failed: 分镜失败
-    extracting --> failed: 抽帧失败
-    analyzing --> failed: 模型错误
-    rendering --> failed: 写入失败
-    failed --> [*]
-    done --> [*]
-```
-
-每一步都写 `jobs.step`、`jobs.progress`、`jobs.updated_at`，前端轮询即可得到进度。
-
-### 5.1 分镜策略
-
-1. ffmpeg `select='gt(scene,threshold)',showinfo` 得到候选切点。
-2. 去掉距离首尾过近的点。
-3. 按 `min_shot_seconds` 合并过短镜头。
-4. 超过 `max_shots` 时按时间均匀合并，避免成本失控。
-5. 无 ffmpeg 或检测失败时，退化为等长切分。
-
-### 5.2 逐镜分析
-
-- 关键帧缩放到 768px 宽，转 base64 data URL。
-- 一次调用只分析一个镜头，降低上下文干扰。
-- LangChain `with_structured_output(ShotAnalysis, include_raw=True)` 拿到结构化结果和 usage。
-- 结构化失败时降级到 `JsonOutputParser`。
-- 仍失败则该镜头使用 Mock 结果并标注降级原因，不阻断整个任务。
-
-### 5.3 音频与对齐
-
-- 可选：抽取 16kHz 单声道音频，调用 ASR 得到带时间戳的片段。
-- 按时间区间重叠把台词拼到对应镜头。
-- v0.1 不做说话人分离，作为 v0.2 扩展点。
-
-## 6. 模块职责
-
-| 模块 | 文件 | 职责 |
-|------|------|------|
-| 配置 | `app/config.py` | 环境变量、路径、默认值 |
-| 数据库 | `app/db.py` | Engine、Session、初始化 |
-| 模型 | `app/models.py` | Project / Job / Shot / PromptProject |
-| 数据结构 | `app/schemas.py` | 结构化输出、配方与提示词方案模型 |
-| LLM 网关 | `app/services/llm.py` | 供应商适配、用量统计 |
-| 媒体 | `app/services/media.py` | 探测、分镜、抽帧、抽音频 |
-| 视觉 | `app/services/vision.py` | 逐镜分析、降级策略 |
-| ASR | `app/services/asr.py` | 转写与时间戳 |
-| 融合 | `app/services/fusion.py` | 台词对齐、节奏指标、摘要 |
-| 配方 | `app/services/recipe.py` | Markdown / JSON 渲染 |
-| 提示词生成 | `app/services/prompt_generation.py` | Brief 规划、结构化输出、Mock、时长归一化 |
-| 提示词导出 | `app/services/prompt_export.py` | Markdown / JSON 渲染 |
-| 流水线 | `app/services/pipeline.py` | 步骤编排、状态推进 |
-| API | `app/api/routes.py` | 视频上传、查询、下载、删除 |
-| 提示词 API | `app/api/prompt_routes.py` | 生成任务、查询、重生成、导出、删除 |
-| 入口 | `app/main.py` | 应用装配、静态资源、页面 |
-
-## 7. LangChain 设计
-
-### 7.1 为什么用 LangChain
-
-- 统一 OpenAI 兼容供应商（OpenAI / DeepSeek / 通义 / 私有网关）。
-- 结构化输出直接映射到 Pydantic 模型，省掉手写 JSON 解析。
-- LCEL 便于把"提示词 → 模型 → 解析"组合成可测试的链。
-- 后续接 RAG、Agent、工具调用时不需要换框架。
-
-### 7.2 关键代码形态
-
-```python
-llm = ChatOpenAI(model=..., api_key=..., base_url=..., temperature=0)
-structured = llm.with_structured_output(ShotAnalysis, include_raw=True)
-result = structured.invoke(messages)   # messages 含 text + image_url
-parsed, raw = result["parsed"], result["raw"]
-```
-
-### 7.3 降级链
-
-```
-结构化输出 → JsonOutputParser → Mock 分析
-```
-
-任何一层失败都不会让整个任务失败，只会降低该镜头的质量，并在 `evidence` 中记录原因。
-
-### 7.4 为什么 v0.1 不用 LangGraph
-
-当前流水线是线性的，LangGraph 的状态机收益有限。等 v0.3 引入"生成 → 质检 → 重试"循环时，再把 `analyzing` 和 `rendering` 迁移为图节点。
-
-## 8. 任务与并发
-
-### v0.1
-
-- `BackgroundTasks` 触发同步流水线，Starlette 在线程池中执行。
-- 逐镜分析用 `ThreadPoolExecutor(max_workers=LLM_CONCURRENCY)`。
-- 任务状态落库，前端每 1.5 秒轮询。
-- 服务重启时，把 `running/queued` 的僵尸任务标记为失败。
-
-### 升级路径
-
-```mermaid
-flowchart LR
-    A[BackgroundTasks] --> B[arq + Redis]
-    B --> C[Celery + Redis/RabbitMQ]
-    C --> D[多 Worker + 独立 GPU 队列]
-```
-
-迁移时保持 `run_pipeline(project_id, job_id)` 接口不变即可。
-
-## 9. 数据模型
-
-```mermaid
-erDiagram
-    PROJECTS ||--o{ SHOTS : has
-    PROJECTS ||--o{ JOBS : runs
-
-    PROJECTS {
-        string id PK
-        string title
-        string source_path
-        string status
-        float duration
-        int width
-        int height
-        float fps
-        datetime created_at
-        datetime updated_at
-    }
-    SHOTS {
-        int id PK
-        string project_id FK
-        int index
-        float start_s
-        float end_s
-        string keyframe_path
-        string transcript
-        string origin
-        float confidence
-        json analysis
-    }
-    JOBS {
-        string id PK
-        string project_id FK
-        string status
-        string step
-        float progress
-        text error
-        json metrics
-        datetime created_at
-        datetime updated_at
-    }
-    PROMPT_PROJECTS {
-        string id PK
-        string title
-        json brief_json
-        json plan_json
-        string status
-        string step
-        float progress
-        text error
-        json metrics
-        datetime created_at
-        datetime updated_at
-    }
-```
-
-设计说明：
-
-- `analysis` 用 JSON 保存完整结构化结果，避免频繁加列。
-- `origin` 和 `confidence` 单独列，便于统计和筛选。
-- 一个项目可多次分析，保留历史 Job。
-- 提示词方案独立存储在 `prompt_projects`，不依赖视频项目；完整 Brief 与方案分别保存在 JSON 列中。
-
-## 10. API 设计
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/healthz` | 健康检查、ffmpeg / LLM 状态 |
-| POST | `/api/projects` | 上传视频并创建分析任务（multipart） |
-| GET | `/api/projects` | 项目列表 |
-| GET | `/api/projects/{id}` | 项目详情（含镜头与最新任务） |
-| GET | `/api/projects/{id}/video` | 受控读取项目源视频 |
-| GET | `/api/projects/{id}/shots/{shot_id}/keyframe` | 受控读取镜头关键帧 |
-| POST | `/api/projects/{id}/analyze` | 重新分析 |
-| GET | `/api/projects/{id}/recipe?format=md\|json` | 下载配方 |
-| DELETE | `/api/projects/{id}` | 删除项目与文件 |
-| GET | `/api/jobs/{id}` | 任务状态 |
-| POST | `/api/prompt-projects` | 根据 Brief 创建提示词生成任务 |
-| GET | `/api/prompt-projects` | 提示词方案列表 |
-| GET | `/api/prompt-projects/{id}` | 提示词方案详情（含完整 plan） |
-| POST | `/api/prompt-projects/{id}/regenerate` | 重新生成方案 |
-| GET | `/api/prompt-projects/{id}/export?format=md\|json` | 下载提示词方案 |
-| DELETE | `/api/prompt-projects/{id}` | 删除提示词方案 |
-| GET | `/` | 工作台页面 |
-
-约定：
-
-- 上传成功返回 `202/201 + project_id + job_id`。
-- 所有错误返回 `{"detail": "..."}`，中文可直接展示。
-- 媒体 URL 使用项目级接口，不暴露绝对路径；不再公开 `/files/*`。
-
-## 11. 存储布局
-
-```
-data/
-├─ app.db
-└─ projects/
-   └─ {project_id}/
-      ├─ source.mp4
-      ├─ audio.wav
-      ├─ frames/
-      │  ├─ shot_0001.jpg
-      │  └─ ...
-      └─ output/
-         ├─ video.md
-         └─ video.json
-```
-
-- 目录名使用 UUID，避免路径穿越和重名。
-- 附件通过受认证的项目级媒体接口读取，不能直接访问 `data/`。
-- 生产环境可替换为对象存储，只需改 `Storage` 接口。
-
-## 12. 可观测性
-
-- 结构化日志：`时间 / 级别 / 模块 / project_id / job_id / 消息`。
-- Job 指标：`calls`、`prompt_tokens`、`completion_tokens`、步骤耗时。
-- PromptProject 指标：文本模型调用次数、输入 / 输出 token 与任务状态。
-- 错误分类：`media_error`、`llm_error`、`asr_error`、`storage_error`。
-- v0.2 接入 OpenTelemetry，把每步做成 span。
-
-## 13. 安全与合规
-
-- 扩展名白名单 + 大小限制 + 空文件校验。
-- UUID 目录 + 删除前校验路径必须位于 `data/projects` 下。
-- 上传文件不放入公开静态目录。
-- `APP_PASSWORD` 非空时启用 HTTP Basic 认证，`/healthz` 保持公开。
-- 生产环境继续增加：正式账号体系、租户隔离、上传限流、病毒扫描。
-- 只分析用户主动上传的内容，不提供下载/搬运能力。
-- 来源判定标注"模型推断"，不作为版权依据。
-
-## 14. 性能与成本
-
-| 手段 | 效果 |
+| 功能 | 工具 |
 |------|------|
-| 关键帧缩放到 768px | 降低图片 token |
-| `MAX_SHOTS=24` | 控制单视频调用上限 |
-| 逐镜并发 2–4 | 缩短总时延 |
-| 只取中点帧 | 每镜 1 张图 |
-| Mock 模式 | 开发与演示零成本 |
-| 结果落库 | 避免重复分析 |
+| 视频探测 | ffprobe / ffmpeg |
+| 场景检测 | ffmpeg select filter |
+| 关键帧抽取 | ffmpeg |
+| 音频提取 | ffmpeg |
+| 语音识别 | OpenAI Whisper API（可选） |
 
-粗略估算：20 个镜头 × 每镜约 1.5k input tokens + 300 output tokens，单视频成本远低于 ¥1（按主流视觉模型价格）。
+### 2.3 前端
 
-## 15. 部署
+| 组件 | 技术 |
+|------|------|
+| 结构 | HTML5 |
+| 样式 | 原生 CSS |
+| 交互 | 原生 JavaScript（无框架）|
+| 实时更新 | Server-Sent Events (SSE) |
 
-单机 Docker：
+---
 
-```dockerfile
-FROM python:3.11-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
-WORKDIR /app
-COPY pyproject.toml README.md ./
-COPY app ./app
-RUN pip install --no-cache-dir -e .
-COPY . .
-EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+## 3. 系统架构
+
+### 3.1 整体架构图
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         用户界面层                               │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
+│  │  index.html │  │  prompt.js  │  │  share.html │              │
+│  │   app.js    │  │             │  │  share.js   │              │
+│  └─────────────┘  └─────────────┘  └─────────────┘              │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         API 路由层                               │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
+│  │   routes    │  │prompt_routes│  │share_routes │              │
+│  │ (视频分析)  │  │ (提示词)    │  │ (分享)      │              │
+│  └─────────────┘  └─────────────┘  └─────────────┘              │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         服务层                                   │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
+│  │   media     │  │   vision    │  │     asr     │              │
+│  │ (媒体处理)  │  │ (视觉分析)  │  │ (语音识别)  │              │
+│  ├─────────────┤  ├─────────────┤  ├─────────────┤              │
+│  │    llm      │  │   fusion    │  │   recipe    │              │
+│  │ (LLM 网关)  │  │ (数据融合)  │  │ (配方生成)  │              │
+│  ├─────────────┤  ├─────────────┤  └─────────────┘              │
+│  │  pipeline   │  │   prompt    │  │              │              │
+│  │ (流水线)    │  │ _generation │  │              │              │
+│  └─────────────┘  └─────────────┘                               │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         数据层                                   │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
+│  │   models    │  │   schemas   │  │     db      │              │
+│  │ (ORM 模型)  │  │ (Pydantic)  │  │ (数据库)    │              │
+│  └─────────────┘  └─────────────┘  └─────────────┘              │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         外部依赖                                 │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
+│  │   ffmpeg    │  │ OpenAI API  │  │  文件系统   │              │
+│  │ (多媒体)    │  │ (LLM/ASR)   │  │ (data 目录) │              │
+│  └─────────────┘  └─────────────┘  └─────────────┘              │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-Nginx 反代时注意：
-
-- `client_max_body_size 500m;`
-- 上传接口超时 `proxy_read_timeout 600s;`
-- 项目视频和关键帧接口可加私有缓存头
-
-## 16. 目录结构
+### 3.2 目录结构
 
 ```
 video-reverse-studio/
-├─ app/
-│  ├─ main.py
-│  ├─ config.py
-│  ├─ db.py
-│  ├─ models.py
-│  ├─ schemas.py
-│  ├─ serializers.py
-│  ├─ api/routes.py
-│  ├─ api/prompt_routes.py
-│  ├─ services/
-│  │  ├─ llm.py
-│  │  ├─ media.py
-│  │  ├─ vision.py
-│  │  ├─ asr.py
-│  │  ├─ fusion.py
-│  │  ├─ recipe.py
-│  │  ├─ prompt_generation.py
-│  │  ├─ prompt_export.py
-│  │  └─ pipeline.py
-│  ├─ prompts/
-│  ├─ templates/
-│  └─ static/
-├─ docs/
-├─ tests/
-├─ data/
-├─ pyproject.toml
-└─ .env.example
+├── app/
+│   ├── __init__.py
+│   ├── main.py              # FastAPI 应用入口
+│   ├── config.py            # 配置管理
+│   ├── db.py                # 数据库连接
+│   ├── models.py            # SQLAlchemy ORM 模型
+│   ├── schemas.py           # Pydantic 数据模型
+│   ├── serializers.py       # API 响应序列化
+│   ├── security.py          # 认证中间件
+│   ├── api/
+│   │   ├── routes.py        # 视频分析 API
+│   │   ├── prompt_routes.py # 提示词生成 API
+│   │   └── share_routes.py  # 分享功能 API
+│   ├── services/
+│   │   ├── media.py         # 媒体处理（ffmpeg）
+│   │   ├── vision.py        # 视觉分析
+│   │   ├── llm.py           # LLM 网关
+│   │   ├── asr.py           # 语音识别
+│   │   ├── fusion.py        # 数据融合
+│   │   ├── recipe.py        # 配方生成
+│   │   ├── pipeline.py      # 分析流水线
+│   │   ├── prompt_generation.py
+│   │   ├── sse.py           # Server-Sent Events
+│   │   └── ...
+│   ├── prompts/
+│   │   └── shot_analysis.md # 视觉分析提示词
+│   ├── templates/
+│   │   ├── index.html       # 主页面
+│   │   ├── video.md.j2      # 配方 Markdown 模板
+│   │   └── share.html       # 分享页面
+│   └── static/
+│       ├── style.css
+│       ├── app.js
+│       ├── prompt.js
+│       └── share.js
+├── data/
+│   ├── projects/            # 项目数据
+│   │   └── {project_id}/
+│   │       ├── source.mp4
+│   │       ├── frames/
+│   │       └── output/
+│   └── reviews/             # 回测数据
+├── tests/
+├── docs/
+├── scripts/
+├── pyproject.toml
+└── .env
 ```
 
-## 17. 关键取舍
+---
 
-| 取舍 | 选择 | 原因 |
+## 4. 核心模块详解
+
+### 4.1 配置管理 (`app/config.py`)
+
+使用 `pydantic-settings` 实现 12-factor app 配置原则：
+
+- 支持 `.env` 文件和环境变量
+- 提供 sensible defaults
+- 路径自动解析
+
+```python
+class Settings(BaseSettings):
+    app_name: str = "ReelReverse"
+    data_dir: Path  # 自动解析相对路径
+    
+    # LLM 配置
+    llm_provider: str = "mock"
+    llm_api_key: str = ""
+    llm_model: str = "gpt-4o-mini"
+    
+    # 媒体处理配置
+    max_upload_mb: int = 500
+    max_shots: int = 24
+    scene_threshold: float = 0.32
+```
+
+### 4.2 数据模型
+
+#### ORM 模型 (`app/models.py`)
+
+```
+Project (项目)
+├── id: str (UUID)
+├── title: str
+├── source_path: str
+├── status: enum (uploaded/running/done/failed/cancelled)
+├── duration, width, height, fps
+├── shots: list[Shot]
+└── jobs: list[Job]
+
+Shot (镜头)
+├── id: int
+├── project_id: str (FK)
+├── index, start_s, end_s
+├── keyframe_path: str
+├── transcript: str
+├── origin: str
+├── confidence: float
+└── analysis: dict (JSON)
+
+Job (任务)
+├── id: str (UUID)
+├── project_id: str (FK)
+├── status, step, progress, error
+└── metrics: dict
+
+PromptProject (提示词项目)
+├── id: str
+├── source_project_id: str (FK, 可选)
+├── brief_json, plan_json
+├── entity_bible_json
+├── versions: list[PromptVersion]
+└── shares: list[PromptShare]
+```
+
+#### Pydantic 模型 (`app/schemas.py`)
+
+用于 API 请求/响应验证：
+
+- `ShotAnalysis`: 单镜头分析结果
+- `Recipe`: 完整配方
+- `PromptBrief`: 提示词生成需求
+- `PromptPlan`: 提示词方案
+
+### 4.3 服务层
+
+#### 媒体处理 (`app/services/media.py`)
+
+核心功能：
+1. `probe()`: 探测视频元数据（时长、分辨率、帧率）
+2. `detect_shots()`: 场景检测分镜
+3. `extract_keyframe()`: 关键帧抽取
+4. `extract_audio()`: 音频提取
+
+**分镜策略**：
+- 使用 ffmpeg 的 `select='gt(scene,threshold)'` 检测场景变化
+- 合并过短的镜头（默认 < 0.8s）
+- 限制最大镜头数（默认 24）
+- 无检测结果时使用等长 fallback
+
+#### 视觉分析 (`app/services/vision.py`)
+
+流程：
+1. 构建 LangChain 消息（System + User + 图片）
+2. 调用 Vision LLM
+3. 结构化输出解析（优先 structured output，降级到 JSON parser）
+4. Mock 模式降级
+
+#### 分析流水线 (`app/services/pipeline.py`)
+
+```
+上传 → 探测元数据 → 场景检测 → 关键帧抽取 → 
+音频转写(可选) → 逐镜分析 → 数据融合 → 配方生成
+```
+
+特点：
+- 后台任务执行（ThreadPoolExecutor）
+- 支持任务取消
+- 实时进度更新
+- 错误处理与降级
+
+#### LLM 网关 (`app/services/llm.py`)
+
+- 统一的 LLM 调用接口
+- 支持视觉模型切换
+- Token 使用统计
+- 并发控制
+
+---
+
+## 5. API 设计
+
+### 5.1 RESTful API
+
+| 端点 | 方法 | 功能 |
 |------|------|------|
-| 服务端渲染 vs SPA | Jinja2 + 原生 JS | 零构建、部署简单，MVP 足够 |
-| SQLite vs Postgres | SQLite | 零运维；接口层已隔离，可平滑迁移 |
-| 逐镜调用 vs 批量调用 | 逐镜调用 | 上下文更聚焦，失败影响面更小 |
-| BackgroundTasks vs Celery | BackgroundTasks | MVP 简单；升级接口不变 |
-| 来源判定用 LLM vs 专用分类器 | LLM | 无需训练数据；后续用评测集校准 |
-| 直接生成视频 vs 只生成提示词/配方 | 只生成提示词/配方 | 复用文本模型能力，避免把成本与范围扩大到视频生成 |
+| `/api/projects` | POST | 创建项目并开始分析 |
+| `/api/projects` | GET | 列出所有项目 |
+| `/api/projects/{id}` | GET | 获取项目详情 |
+| `/api/projects/{id}/recipe` | GET | 下载配方 (md/json) |
+| `/api/jobs/{id}/events` | GET | SSE 实时进度 |
+| `/api/prompt-projects` | POST | 创建提示词项目 |
+| `/api/prompt-projects/{id}/export` | GET | 导出提示词方案 |
 
-## 18. 演进路线
+### 5.2 实时更新
 
-- **v0.2**：多模态增强（音频情绪、BGM 节奏）、批量对比、相似镜头检索
-- **v0.3**：接入视频生成模型，形成"分析 → 生成 → 质检 → 重试"闭环（此时引入 LangGraph）
-- **v0.4**：多租户、团队空间、对象存储、队列化
-- **v0.5**：来源判定评测集与回归看板，把准确率做成可量化指标
-## 19. 私有网关适配（2026-11 验证）
+使用 Server-Sent Events (SSE) 实现任务进度推送：
 
-当前默认走 OpenAI 兼容协议，已验证网关同时支持：
-
-| 协议 | 路径 | 项目状态 |
-|------|------|----------|
-| OpenAI 兼容 | `/v1/chat/completions` | 已接入（`langchain-openai`） |
-| Anthropic 原生 | `/v1/messages` | 可用，未接入（可加 `langchain-anthropic`） |
-
-验证结果：
-
-- `dashscope/qwen3.7-plus` 支持图片输入，逐镜视觉分析可正常返回结构化结果
-- 结构化输出通过 OpenAI tool calling 成功，未触发降级
-- 2 个镜头约消耗 2.9k input tokens / 1.6k output tokens
-- 内网地址与密钥只存于 `.env`，不进入代码和示例文件
-
-生产切换只需改环境变量：
-
-```env
-LLM_PROVIDER=openai
-LLM_BASE_URL=https://your-gateway.example.com/v1
-LLM_API_KEY=...
-LLM_MODEL=...
-VISION_MODEL=...
+```javascript
+const es = new EventSource(`/api/jobs/${jobId}/events`);
+es.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  updateProgress(data.progress, data.step);
+};
 ```
 
-若生产网关只暴露 Anthropic 协议，新增一个 `AnthropicGateway` 分支即可，`LLMGateway` 的对外接口不变。
+---
+
+## 6. 数据流
+
+### 6.1 视频分析流程
+
+```mermaid
+flowchart LR
+    A[上传视频] --> B[创建 Project]
+    B --> C[创建 Job]
+    C --> D[后台执行 pipeline]
+    
+    subgraph Pipeline
+        D --> E[探测元数据]
+        E --> F[场景检测]
+        F --> G[关键帧抽取]
+        G --> H[音频转写]
+        H --> I[逐镜视觉分析]
+        I --> J[数据融合]
+        J --> K[生成配方]
+    end
+    
+    K --> L[更新 Project 状态]
+    L --> M[前端 SSE 轮询]
+```
+
+### 6.2 提示词生成流程
+
+```mermaid
+flowchart LR
+    A[提交 Brief] --> B[构建 Reference]
+    B --> C[创建 PromptProject]
+    C --> D[后台生成]
+    
+    subgraph Generation
+        D --> E[LLM 生成 PromptPlan]
+        E --> F[规范化处理]
+        F --> G[创建版本快照]
+    end
+    
+    G --> H[更新项目状态]
+```
+
+---
+
+## 7. 部署架构
+
+### 7.1 单机部署
+
+```
+┌─────────────────────────────────────┐
+│            单机服务器               │
+│  ┌───────────────────────────────┐  │
+│  │     uvicorn + FastAPI         │  │
+│  │     (端口 8000)               │  │
+│  └───────────────────────────────┘  │
+│                 │                    │
+│  ┌───────────────────────────────┐  │
+│  │     SQLite 数据库             │  │
+│  │     (data/app.db)             │  │
+│  └───────────────────────────────┘  │
+│                 │                    │
+│  ┌───────────────────────────────┐  │
+│  │     文件存储                   │  │
+│  │     (data/projects)           │  │
+│  └───────────────────────────────┘  │
+└─────────────────────────────────────┘
+```
+
+### 7.2 生产部署建议
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│   Nginx      │────▶│  FastAPI     │────▶│  PostgreSQL  │
+│  (反向代理)  │     │  (多实例)    │     │  (数据库)    │
+└──────────────┘     └──────────────┘     └──────────────┘
+                            │
+                     ┌──────────────┐
+                     │  共享存储    │
+                     │  (NFS/S3)    │
+                     └──────────────┘
+```
+
+---
+
+## 8. 扩展点
+
+### 8.1 已支持的扩展
+
+1. **LLM Provider**: 支持 OpenAI 兼容的任意网关
+2. **ASR Provider**: 可选的语音识别服务
+3. **模型配置**: 可配置的视觉模型和文本模型
+
+### 8.2 未来扩展方向
+
+1. **批量对比**: 多视频横向对比
+2. **相似镜头检索**: 向量化镜头检索
+3. **视频生成对接**: 可灵/即梦/Runway API
+4. **团队协作**: 多租户、权限管理
+
+---
+
+## 9. 安全考虑
+
+### 9.1 已实现的安全措施
+
+- HTTP Basic 认证（可选）
+- 文件类型校验
+- 文件大小限制
+- 路径遍历防护
+
+### 9.2 建议增强
+
+- HTTPS 强制（生产环境）
+- Rate limiting
+- 输入消毒
+- 审计日志
+
+---
+
+## 10. 监控与运维
+
+### 10.1 健康检查
+
+```bash
+curl http://localhost:8000/healthz
+```
+
+返回：
+```json
+{
+  "status": "ok",
+  "llm_provider": "openai",
+  "llm_enabled": true,
+  "ffmpeg": true,
+  "ffprobe": true
+}
+```
+
+### 10.2 关键指标
+
+- 任务处理时延
+- LLM Token 消耗
+- 错误率
+- 存储使用量
+
+---
+
+## 附录：技术决策记录
+
+| 决策 | 选择 | 原因 |
+|------|------|------|
+| Web 框架 | FastAPI | 异步支持、自动文档、类型安全 |
+| ORM | SQLAlchemy 2.0 | 成熟稳定、异步支持 |
+| LLM 框架 | LangChain | 结构化输出、Provider 抽象 |
+| 前端 | 原生 JS | 简单依赖、快速开发 |
+| 数据库 | SQLite | 零配置、适合单机部署 |

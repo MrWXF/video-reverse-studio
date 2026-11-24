@@ -1,34 +1,30 @@
 import hashlib
 import json
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import JsonOutputParser
+from sqlalchemy.orm import Session
 
 from ..config import Settings, get_settings
 from ..db import SessionLocal
 from ..models import PromptProject
-from ..prompts import load_prompt
+from ..observability import request_id_ctx
+from ..prompts import load_catalog, load_prompt
 from ..schemas import PromptBrief, PromptPlan, PromptShot, ReferenceContext
+from . import capacity
 from .llm import LLMGateway
+from .mock import MockScenarioError
 from .model_profiles import get_model_profile, validate_prompt_plan
 from .prompt_versions import create_prompt_version
+from .redaction import redact_exception
 from .reference import compact_reference
+from .retry import RetryableServiceError, is_retryable_exception, retry_call
 
 logger = logging.getLogger(__name__)
-
-_SHOT_TYPES = ["远景", "全景", "中景", "近景", "特写", "大特写"]
-_MOVES = ["固定", "缓慢推镜", "横移", "跟拍", "环绕", "升降"]
-_LIGHTING = ["自然柔光", "侧逆光", "暖色轮廓光", "冷色环境光", "高对比硬光"]
-_TRANSITIONS = ["直切", "叠化", "遮挡转场", "动作衔接", "淡入淡出"]
-_PALETTES = [
-    ["#0f172a", "#38bdf8", "#e2e8f0"],
-    ["#1c1917", "#f59e0b", "#fef3c7"],
-    ["#052e16", "#22c55e", "#dcfce7"],
-    ["#3b0764", "#a855f7", "#f3e8ff"],
-]
 
 _LOCKABLE_FIELDS = {
     "shot_type",
@@ -46,7 +42,7 @@ _LOCKABLE_FIELDS = {
 
 
 def _update_project(
-    db,
+    db: Session,
     project: PromptProject,
     *,
     status: str | None = None,
@@ -66,54 +62,101 @@ def _update_project(
     db.commit()
 
 
-def run_prompt_generation(project_id: str) -> None:
+def run_prompt_generation(project_id: str, request_id: str | None = None) -> None:
+    """Generate and persist a prompt plan with bounded concurrency and retries."""
     settings = get_settings()
-    with SessionLocal() as db:
-        project = db.get(PromptProject, project_id)
-        if project is None:
-            logger.error("prompt project missing: %s", project_id)
-            return
-
-        try:
-            db.refresh(project)
-            if project.status == "cancelled":
+    trace_id = request_id or f"prompt-{project_id}"
+    token = request_id_ctx.set(trace_id)
+    try:
+        with SessionLocal() as db:
+            project = db.get(PromptProject, project_id)
+            if project is None:
+                logger.error("prompt project missing: %s", project_id)
                 return
-            brief = PromptBrief.model_validate(project.brief_json or {})
-            reference = (
-                ReferenceContext.model_validate(project.reference_snapshot_json)
-                if project.reference_snapshot_json
-                else None
-            )
-            _update_project(db, project, status="running", step="planning", progress=0.15)
-            gateway = LLMGateway(settings)
-            plan, notes = generate_prompt_plan(brief, gateway, reference)
-            _update_project(db, project, step="validating", progress=0.85)
-            plan = normalize_prompt_plan(plan, brief, reference=reference)
-            plan.warnings.extend(notes)
-
-            db.refresh(project)
-            if project.status == "cancelled":
+            if not capacity.acquire_job(settings.max_active_jobs):
+                project.status = "failed"
+                project.step = "failed"
+                project.error = "系统繁忙，当前同时生成任务已达上限，请稍后重试"
+                project.updated_at = datetime.now(timezone.utc)
+                db.commit()
                 return
+            try:
+                db.refresh(project)
+                if project.status == "cancelled":
+                    return
+                brief = PromptBrief.model_validate(project.brief_json or {})
+                reference = (
+                    ReferenceContext.model_validate(project.reference_snapshot_json)
+                    if project.reference_snapshot_json
+                    else None
+                )
+                _update_project(db, project, status="running", step="planning", progress=0.15)
+                gateway = LLMGateway(settings)
 
-            project.title = plan.title or project.title
-            project.plan_json = plan.model_dump(mode="json")
-            project.metrics = gateway.stats()
-            create_prompt_version(db, project, "generate")
-            _update_project(
-                db,
-                project,
-                status="done",
-                step="done",
-                progress=1.0,
-                error="",
-            )
-        except Exception as exc:
-            logger.exception("prompt generation failed for project %s", project_id)
-            project.status = "failed"
-            project.step = "failed"
-            project.error = str(exc)[:2000]
-            project.updated_at = datetime.now(timezone.utc)
-            db.commit()
+                def generate_attempt() -> tuple[PromptPlan, list[str]]:
+                    candidate, attempt_notes = generate_prompt_plan(
+                        brief, gateway, reference
+                    )
+                    _update_project(db, project, step="validating", progress=0.85)
+                    candidate = normalize_prompt_plan(
+                        candidate,
+                        brief,
+                        reference=reference,
+                        catalog_path=settings.prompt_catalog_file,
+                    )
+                    return candidate, attempt_notes
+
+                def on_retry(attempt: int, exc: BaseException, delay: float) -> None:
+                    db.rollback()
+                    logger.warning(
+                        "retrying prompt generation project=%s attempt=%s delay=%.2fs",
+                        project_id,
+                        attempt,
+                        delay,
+                    )
+                    project.step = "retrying"
+                    project.progress = 0.1
+                    project.error = redact_exception(exc, settings, limit=500)
+                    project.updated_at = datetime.now(timezone.utc)
+                    db.commit()
+
+                plan, notes = retry_call(
+                    generate_attempt,
+                    attempts=settings.retry_max_attempts,
+                    base_delay=settings.retry_base_delay_s,
+                    max_delay=settings.retry_max_delay_s,
+                    on_retry=on_retry,
+                )
+                plan.warnings.extend(notes)
+
+                db.refresh(project)
+                if project.status == "cancelled":
+                    return
+
+                project.title = plan.title or project.title
+                project.plan_json = plan.model_dump(mode="json")
+                project.metrics = {**gateway.stats(), "request_id": trace_id}
+                create_prompt_version(db, project, "generate")
+                _update_project(
+                    db,
+                    project,
+                    status="done",
+                    step="done",
+                    progress=1.0,
+                    error="",
+                )
+            except Exception as exc:
+                logger.exception("prompt generation failed for project %s", project_id)
+                db.rollback()
+                project.status = "failed"
+                project.step = "failed"
+                project.error = redact_exception(exc, settings)
+                project.updated_at = datetime.now(timezone.utc)
+                db.commit()
+            finally:
+                capacity.release_job()
+    finally:
+        request_id_ctx.reset(token)
 
 
 def generate_prompt_plan(
@@ -122,11 +165,21 @@ def generate_prompt_plan(
     reference: ReferenceContext | None = None,
 ) -> tuple[PromptPlan, list[str]]:
     if not gateway.enabled:
-        return mock_prompt_plan(brief, reference), ["Mock 模式：未调用文本模型"]
+        return mock_prompt_plan(
+            brief,
+            reference,
+            scenario=gateway.settings.mock_scenario,
+            catalog_path=gateway.settings.prompt_catalog_file,
+        ), ["Mock 模式：未调用文本模型"]
 
     llm = gateway.chat_model()
     if llm is None:
-        return mock_prompt_plan(brief, reference), ["未配置文本模型，已使用 Mock 方案"]
+        return mock_prompt_plan(
+            brief,
+            reference,
+            scenario=gateway.settings.mock_scenario,
+            catalog_path=gateway.settings.prompt_catalog_file,
+        ), ["未配置文本模型，已使用 Mock 方案"]
 
     messages = [
         SystemMessage(content=load_prompt("video_prompt_generation")),
@@ -152,6 +205,10 @@ def generate_prompt_plan(
         return PromptPlan.model_validate(data), ["结构化输出失败，已使用 JSON 解析降级"]
     except Exception as exc:
         logger.error("prompt plan generation failed: %s", exc)
+        if is_retryable_exception(exc):
+            raise RetryableServiceError(
+                redact_exception(exc, gateway.settings, limit=500)
+            ) from exc
         raise RuntimeError(f"提示词生成失败：{str(exc)[:500]}") from exc
 
 
@@ -182,7 +239,10 @@ def normalize_prompt_plan(
     *,
     generated_at: datetime | None = None,
     reference: ReferenceContext | None = None,
+    catalog_path: str = "",
 ) -> PromptPlan:
+    """Normalize model output into a complete, time-aligned prompt plan."""
+    catalog = load_catalog(catalog_path)
     shots = sorted(plan.shots, key=lambda item: item.index)
     if not shots:
         raise RuntimeError("模型未返回任何镜头")
@@ -213,7 +273,9 @@ def normalize_prompt_plan(
     cursor = 0.0
     normalized_shots: list[PromptShot] = []
 
-    for index, (shot, raw_duration) in enumerate(zip(shots, durations), start=1):
+    for index, (shot, raw_duration) in enumerate(
+        zip(shots, durations, strict=False), start=1
+    ):
         duration = round(raw_duration * scale, 3)
         if index == len(shots):
             duration = round(brief.duration_s - cursor, 3)
@@ -227,7 +289,9 @@ def normalize_prompt_plan(
         shot.negative_prompt = shot.negative_prompt or brief.negative_prompt
         shot.shot_type = shot.shot_type or "中景"
         shot.camera_movement = shot.camera_movement or "固定"
-        shot.transition = shot.transition or _TRANSITIONS[(index - 1) % len(_TRANSITIONS)]
+        shot.transition = shot.transition or catalog["transitions"][
+            (index - 1) % len(catalog["transitions"])
+        ]
         shot.locked_fields = _clean_locked_fields(shot.locked_fields)
         if reference is not None and reference.mode in {"structure", "full"}:
             source_shots = reference.recipe.shots
@@ -277,7 +341,16 @@ def _compose_prompt(
 def mock_prompt_plan(
     brief: PromptBrief,
     reference: ReferenceContext | None = None,
+    *,
+    scenario: str = "success",
+    catalog_path: str = "",
 ) -> PromptPlan:
+    scenario = (scenario or "success").lower().strip()
+    if scenario == "fail":
+        raise MockScenarioError("Mock 已按配置模拟提示词生成失败")
+    if scenario == "slow":
+        time.sleep(0.05)
+    catalog = load_catalog(catalog_path)
     seed = int(hashlib.sha1(brief.idea.encode("utf-8")).hexdigest()[:8], 16)
     count = brief.shot_count
     step = brief.duration_s / count
@@ -296,11 +369,15 @@ def mock_prompt_plan(
 
     for index in range(1, count + 1):
         local = seed + index * 31
-        shot_type = _SHOT_TYPES[local % len(_SHOT_TYPES)]
-        movement = _MOVES[(local // 3) % len(_MOVES)]
-        lighting = _LIGHTING[(local // 5) % len(_LIGHTING)]
-        transition = _TRANSITIONS[(local // 7) % len(_TRANSITIONS)]
-        palette = _PALETTES[(local // 11) % len(_PALETTES)]
+        shot_type = catalog["shot_types"][local % len(catalog["shot_types"])]
+        movement = catalog["camera_moves"][
+            (local // 3) % len(catalog["camera_moves"])
+        ]
+        lighting = catalog["lighting"][(local // 5) % len(catalog["lighting"])]
+        transition = catalog["transitions"][
+            (local // 7) % len(catalog["transitions"])
+        ]
+        palette = catalog["palettes"][(local // 11) % len(catalog["palettes"])]
         source_shot_index = None
         if reference_shots:
             source_shot = reference_shots[(index - 1) % len(reference_shots)]
@@ -414,7 +491,12 @@ def regenerate_prompt_shot(
         if candidate is not None:
             notes.append("单镜已由文本模型重生成")
     if candidate is None:
-        candidate = _local_regenerate_shot(brief, current, locked)
+        candidate = _local_regenerate_shot(
+            brief,
+            current,
+            locked,
+            settings.prompt_catalog_file,
+        )
         notes.append("单镜已局部重生成")
 
     merged = current.model_copy(deep=True)
@@ -458,11 +540,16 @@ def _model_regenerate_shot(
     )
     try:
         structured = llm.with_structured_output(PromptShot, include_raw=True)
-        result = structured.invoke(
-            [
-                SystemMessage(content=load_prompt("video_prompt_generation")),
-                HumanMessage(content=prompt),
-            ]
+        result = retry_call(
+            lambda: structured.invoke(
+                [
+                    SystemMessage(content=load_prompt("video_prompt_generation")),
+                    HumanMessage(content=prompt),
+                ]
+            ),
+            attempts=gateway.settings.retry_max_attempts,
+            base_delay=gateway.settings.retry_base_delay_s,
+            max_delay=gateway.settings.retry_max_delay_s,
         )
         raw = result.get("raw") if isinstance(result, dict) else None
         if raw is not None:
@@ -477,22 +564,32 @@ def _local_regenerate_shot(
     brief: PromptBrief,
     current: PromptShot,
     locked: set[str],
+    catalog_path: str = "",
 ) -> PromptShot:
+    catalog = load_catalog(catalog_path)
     candidate = current.model_copy(deep=True)
     seed = int(
         hashlib.sha1(f"{current.prompt}:{uuid.uuid4().hex}".encode("utf-8")).hexdigest()[:8],
         16,
     )
     if "shot_type" not in locked:
-        candidate.shot_type = _SHOT_TYPES[seed % len(_SHOT_TYPES)]
+        candidate.shot_type = catalog["shot_types"][seed % len(catalog["shot_types"])]
     if "camera_movement" not in locked:
-        candidate.camera_movement = _MOVES[(seed // 3) % len(_MOVES)]
+        candidate.camera_movement = catalog["camera_moves"][
+            (seed // 3) % len(catalog["camera_moves"])
+        ]
     if "lighting" not in locked:
-        candidate.lighting = _LIGHTING[(seed // 5) % len(_LIGHTING)]
+        candidate.lighting = catalog["lighting"][
+            (seed // 5) % len(catalog["lighting"])
+        ]
     if "transition" not in locked:
-        candidate.transition = _TRANSITIONS[(seed // 7) % len(_TRANSITIONS)]
+        candidate.transition = catalog["transitions"][
+            (seed // 7) % len(catalog["transitions"])
+        ]
     if "color_palette" not in locked:
-        candidate.color_palette = _PALETTES[(seed // 11) % len(_PALETTES)]
+        candidate.color_palette = catalog["palettes"][
+            (seed // 11) % len(catalog["palettes"])
+        ]
     if "prompt" not in locked:
         candidate.prompt = _compose_prompt(
             candidate,

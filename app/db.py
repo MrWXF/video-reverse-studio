@@ -1,4 +1,5 @@
-from collections.abc import Generator
+from collections.abc import Callable, Generator
+from dataclasses import dataclass
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -20,13 +21,19 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     if engine.dialect.name == "sqlite":
-        _ensure_sqlite_columns()
+        _apply_sqlite_migrations()
 
 
 def _ensure_sqlite_columns(target_engine=None) -> None:
-    """Apply additive migrations for existing SQLite databases."""
+    """Add the reference columns used by prompt plans.
+
+    The function is intentionally idempotent so it can also be called directly
+    by migration tooling or maintenance scripts.
+    """
     target_engine = target_engine or engine
     table = "prompt_projects"
+    if table not in inspect(target_engine).get_table_names():
+        return
     columns = {column["name"] for column in inspect(target_engine).get_columns(table)}
     additions = {
         "source_project_id": "VARCHAR(36)",
@@ -40,6 +47,56 @@ def _ensure_sqlite_columns(target_engine=None) -> None:
                 connection.execute(
                     text(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
                 )
+
+
+@dataclass(frozen=True)
+class _Migration:
+    version: int
+    name: str
+    apply: Callable[[object], None]
+
+
+_SQLITE_MIGRATIONS = (
+    _Migration(1, "add_prompt_reference_columns", _ensure_sqlite_columns),
+)
+
+
+def _apply_sqlite_migrations(target_engine=None) -> list[int]:
+    """Apply pending SQLite migrations once and record their versions."""
+    target_engine = target_engine or engine
+    with target_engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    name VARCHAR(200) NOT NULL,
+                    applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+    with target_engine.connect() as connection:
+        applied = {
+            int(row[0])
+            for row in connection.execute(text("SELECT version FROM schema_migrations"))
+        }
+
+    newly_applied: list[int] = []
+    for migration in _SQLITE_MIGRATIONS:
+        if migration.version in applied:
+            continue
+        migration.apply(target_engine)
+        with target_engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT OR IGNORE INTO schema_migrations (version, name) "
+                    "VALUES (:version, :name)"
+                ),
+                {"version": migration.version, "name": migration.name},
+            )
+        newly_applied.append(migration.version)
+    return newly_applied
 
 
 def get_db() -> Generator[Session, None, None]:

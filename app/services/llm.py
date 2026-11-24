@@ -29,7 +29,7 @@ class LLMGateway:
             "api_key": self.settings.llm_api_key,
             "temperature": 0,
             "timeout": self.settings.request_timeout_s,
-            "max_retries": 2,
+            "max_retries": max(1, self.settings.retry_max_attempts - 1),
         }
         if self.settings.llm_base_url:
             kwargs["base_url"] = self.settings.llm_base_url

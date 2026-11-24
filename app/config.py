@@ -39,6 +39,16 @@ class Settings(BaseSettings):
     min_shot_seconds: float = 0.8
     llm_concurrency: int = 2
     request_timeout_s: int = 90
+    max_active_jobs: int = Field(default=4, ge=1, le=32)
+    retry_max_attempts: int = Field(default=3, ge=1, le=8)
+    retry_base_delay_s: float = Field(default=0.8, ge=0.0, le=30.0)
+    retry_max_delay_s: float = Field(default=8.0, ge=0.0, le=120.0)
+    prompt_catalog_file: str = ""
+    mock_scenario: str = "success"
+    mock_fail_shot: int = Field(default=0, ge=0)
+    sse_heartbeat_s: float = Field(default=15.0, ge=2.0, le=120.0)
+    sse_max_seconds: float = Field(default=900.0, ge=30.0, le=86400.0)
+    sse_max_connections: int = Field(default=32, ge=1, le=1000)
 
     @field_validator("data_dir")
     @classmethod

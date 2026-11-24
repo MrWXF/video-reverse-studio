@@ -10,6 +10,8 @@ from ..schemas import ShotAnalysis
 from .llm import LLMGateway
 from .media import VideoMeta
 from .mock import mock_analysis
+from .redaction import redact_exception
+from .retry import retry_call
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +48,18 @@ def analyze_shot(
     transcript: str,
     meta: VideoMeta,
 ) -> ShotAnalysis:
+    """Analyze one keyframe into a structured, reproducible shot recipe."""
     llm = gateway.chat_model(vision=True)
     if llm is None:
-        return mock_analysis(index, start_s, end_s, transcript)
+        return mock_analysis(
+            index,
+            start_s,
+            end_s,
+            transcript,
+            scenario=gateway.settings.mock_scenario,
+            fail_shot=gateway.settings.mock_fail_shot,
+            catalog_path=gateway.settings.prompt_catalog_file,
+        )
 
     messages = [
         SystemMessage(content=load_prompt("shot_analysis")),
@@ -65,7 +76,12 @@ def analyze_shot(
 
     try:
         structured = llm.with_structured_output(ShotAnalysis, include_raw=True)
-        result = structured.invoke(messages)
+        result = retry_call(
+            lambda: structured.invoke(messages),
+            attempts=gateway.settings.retry_max_attempts,
+            base_delay=gateway.settings.retry_base_delay_s,
+            max_delay=gateway.settings.retry_max_delay_s,
+        )
         raw = result.get("raw") if isinstance(result, dict) else None
         parsed = result.get("parsed") if isinstance(result, dict) else None
         if raw is not None:
@@ -78,10 +94,24 @@ def analyze_shot(
 
     try:
         chain = llm | JsonOutputParser()
-        data = chain.invoke(messages)
+        data = retry_call(
+            lambda: chain.invoke(messages),
+            attempts=gateway.settings.retry_max_attempts,
+            base_delay=gateway.settings.retry_base_delay_s,
+            max_delay=gateway.settings.retry_max_delay_s,
+        )
         return ShotAnalysis.model_validate(data)
     except Exception as exc:
         logger.error("vision analysis failed for shot %s: %s", index, exc)
-        fallback = mock_analysis(index, start_s, end_s, transcript)
-        fallback.evidence.append(f"LLM 调用失败，已降级：{str(exc)[:180]}")
+        fallback = mock_analysis(
+            index,
+            start_s,
+            end_s,
+            transcript,
+            catalog_path=gateway.settings.prompt_catalog_file,
+        )
+        fallback.evidence.append(
+            "LLM 调用失败，已降级："
+            + redact_exception(exc, gateway.settings, limit=180)
+        )
         return fallback

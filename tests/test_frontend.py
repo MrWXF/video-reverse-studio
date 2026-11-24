@@ -40,6 +40,7 @@ def test_frontend_assets_expose_design_system_hooks():
     css = (root / "app" / "static" / "style.css").read_text(encoding="utf-8")
     app_js = (root / "app" / "static" / "app.js").read_text(encoding="utf-8")
     prompt_js = (root / "app" / "static" / "prompt.js").read_text(encoding="utf-8")
+    shared_js = (root / "app" / "static" / "shared.js").read_text(encoding="utf-8")
 
     assert 'data-style="a"' in html
     assert 'data-style-option="a"' in html
@@ -68,3 +69,6 @@ def test_frontend_assets_expose_design_system_hooks():
     assert "comparison-summary" in prompt_js
     assert ".prompt-studio-tools" in css
     assert ".field-locks" in css
+    assert "global.ReelReverse" in shared_js
+    assert "window.ReelReverse" in app_js
+    assert "window.ReelReverse" in prompt_js
