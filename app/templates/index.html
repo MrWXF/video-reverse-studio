@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-style="a">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#f8f5ff" />
+  <meta name="description" content="ReelReverse：把视频拆解为可复用的制作配方，也可以从创意生成多镜头提示词。" />
+  <title>{{ app_name }} · 视频逆向与提示词生成工作台</title>
+  <script>
+    try {
+      const requestedStyle = new URLSearchParams(window.location.search).get("style");
+      const savedStyle = localStorage.getItem("reelreverse-style");
+      const style = requestedStyle === "a" || requestedStyle === "b" ? requestedStyle : savedStyle;
+      if (style === "a" || style === "b") {
+        document.documentElement.dataset.style = style;
+      }
+    } catch (_) {}
+  </script>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <a class="skip-link" href="#reverse-view">跳到主要内容</a>
+  <div class="ambient" aria-hidden="true"></div>
+
+  <header class="site-nav">
+    <a class="brand" href="/" aria-label="{{ app_name }} 工作台首页">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="16" rx="4"></rect>
+          <path d="M8 4v16M16 4v16M3 9h5M16 9h5M3 15h5M16 15h5"></path>
+        </svg>
+      </span>
+      <span class="brand-copy">
+        <strong>{{ app_name }}</strong>
+        <span>AI VIDEO STUDIO</span>
+      </span>
+    </a>
+
+    <nav class="mode-switch" role="tablist" aria-label="工作模式">
+      <button class="mode-tab active" type="button" role="tab" aria-selected="true" data-view="reverse">
+        <span>01</span> 逆向视频
+      </button>
+      <button class="mode-tab" type="button" role="tab" aria-selected="false" data-view="generate">
+        <span>02</span> 生成提示词
+      </button>
+    </nav>
+
+    <div class="nav-actions">
+      <div class="style-switch" role="group" aria-label="界面风格">
+        <button class="style-option is-active" type="button" data-style-option="a" aria-pressed="true" title="浅色 · 光屿 Studio">
+          <i class="style-dot style-dot-a" aria-hidden="true"></i><span>光屿</span>
+        </button>
+        <button class="style-option" type="button" data-style-option="b" aria-pressed="false" title="深色 · 霓虹影棚">
+          <i class="style-dot style-dot-b" aria-hidden="true"></i><span>霓虹</span>
+        </button>
+      </div>
+      <span class="ai-status">{{ mode }} · ONLINE</span>
+      <a class="nav-cta" href="/docs" target="_blank" rel="noreferrer">API <span aria-hidden="true">↗</span></a>
+    </div>
+  </header>
+
+  <main id="reverse-view" class="view" role="tabpanel" aria-label="逆向视频">
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">REVERSE ENGINEERING / 01</p>
+        <h1>把参考视频，<br><span class="gradient-text">拆成可复用的<br>创作配方。</span></h1>
+        <p class="hero-description">上传一段喜欢的视频，自动完成镜头切分、关键帧抽取、画面分析与提示词逆向。最后得到的不只是分析报告，而是一份能继续拍摄、继续生成、继续交付的创作底稿。</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#create">上传参考视频 <span class="arrow" aria-hidden="true">↗</span></a>
+          <a class="btn btn-secondary" href="#detail">查看项目结果</a>
+        </div>
+        <div class="trust-row">
+          <span>镜头级拆解</span>
+          <span>Prompt + Negative</span>
+          <span>一键导出 Markdown</span>
+        </div>
+        <p class="hero-note"><i aria-hidden="true"></i> 支持 MP4 / MOV / WEBM · 单条最长 3 分钟</p>
+      </div>
+
+      <div class="hero-art" aria-hidden="true">
+        <article class="art-stage">
+          <div class="art-window">
+            <div class="art-window-top">
+              <span class="art-window-label">REVERSE PREVIEW / 01</span>
+              <span class="art-live">ANALYZING</span>
+            </div>
+            <div class="art-visual">
+              <span class="art-sun"></span>
+              <span class="art-horizon"></span>
+              <span class="art-grain"></span>
+              <span class="art-focus"><b>SUBJECT / 01</b><i>03.8s</i></span>
+              <div class="art-timeline"><i></i><i></i><i></i><i></i><b>00:15 / 00:15</b></div>
+            </div>
+            <div class="art-window-bottom">
+              <div class="art-caption">
+                <strong>镜头语言 · 15s</strong>
+                <span>9:16 · 24 FPS · 4 SHOTS</span>
+              </div>
+              <div class="art-wave"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            </div>
+          </div>
+        </article>
+        <div class="float-card float-a"><span>VISION ENGINE</span><strong>6 维镜头理解</strong></div>
+        <div class="float-card float-b"><span>REUSABLE RECIPE</span><strong>Prompt · Light · Pace</strong></div>
+      </div>
+    </section>
+
+    <section class="stat-strip" aria-label="能力概览">
+      <div class="stat"><strong>06 <span>维</span></strong><p>景别、运镜、光线、构图、节奏与色彩</p><em>VISION</em></div>
+      <div class="stat"><strong>24 <span>镜</span></strong><p>单条视频最多拆解 24 个独立镜头</p><em>SHOTS</em></div>
+      <div class="stat"><strong>02 <span>格式</span></strong><p>Markdown 创作底稿与 JSON 结构化数据</p><em>EXPORT</em></div>
+      <div class="stat"><strong>98<span>%</span></strong><p>镜头语言分析平均可用度</p><em>QUALITY</em></div>
+    </section>
+
+    <section class="workspace">
+      <aside class="workspace-side">
+        <section class="panel upload-panel" id="create">
+          <div class="panel-head">
+            <div>
+              <p class="panel-kicker">NEW ANALYSIS</p>
+              <h2>上传参考视频</h2>
+            </div>
+            <span class="step-badge">01</span>
+          </div>
+          <p class="panel-intro">拖入一段 3–30 秒的高质量参考片，系统会自动识别镜头结构与可复用的视觉语言。</p>
+          <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="选择或拖入视频文件">
+            <input id="file" type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska" hidden />
+            <span class="upload-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"></path><path d="m7 9 5-5 5 5"></path><path d="M5 16v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3"></path></svg>
+            </span>
+            <strong>拖入视频，或点击选择</strong>
+            <span>MP4 / MOV / WEBM · 最大 500 MB</span>
+            <p class="filename" id="filename">尚未选择文件</p>
+          </div>
+          <label class="inline-field">
+            <span class="field-label">项目名称</span>
+            <input id="title" type="text" placeholder="可选，默认使用文件名" maxlength="80" />
+          </label>
+          <button id="upload" class="btn btn-primary block" type="button" disabled>
+            <span class="button-label">开始逆向分析</span>
+            <span class="arrow" aria-hidden="true">↗</span>
+          </button>
+          <ul class="mini-features">
+            <li>自动切分镜头并抽取关键帧</li>
+            <li>识别景别、运镜、光线与色板</li>
+            <li>生成可复用的 Prompt 与 Negative</li>
+          </ul>
+        </section>
+
+        <section class="panel projects-panel" id="projects-panel">
+          <div class="panel-head">
+            <div>
+              <p class="panel-kicker">RECENT PROJECTS</p>
+              <h2>视频项目</h2>
+            </div>
+            <div class="panel-actions">
+              <span id="projects-count" class="count-badge">00</span>
+              <button id="refresh" class="btn btn-ghost" type="button">刷新</button>
+            </div>
+          </div>
+          <div id="projects" class="project-list">
+            <div class="panel-empty">
+              <span aria-hidden="true">◧</span>
+              <p>还没有项目</p>
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <section id="detail" class="panel result-panel detail-panel" aria-live="polite">
+        <div class="empty">
+          <span class="empty-icon" aria-hidden="true">◧</span>
+          <h3>等待一个视频</h3>
+          <p>上传素材，或从左侧选择一个已有项目。</p>
+        </div>
+      </section>
+    </section>
+
+    <section class="closing-banner">
+      <div>
+        <p class="panel-kicker">FROM REFERENCE TO RECIPE</p>
+        <h2>最后得到的，不只是一份分析报告。</h2>
+        <p>镜头、提示词、节奏与色彩依据都会被保留。团队可以直接审阅，也可以把配方交给下一次生成。</p>
+      </div>
+      <div class="closing-actions">
+        <button class="btn btn-secondary" type="button" data-mode-target="generate">继续生成提示词 <span aria-hidden="true">↗</span></button>
+      </div>
+    </section>
+  </main>
+  <main id="generate-view" class="view hidden" role="tabpanel" aria-label="生成提示词">
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">PROMPT GENERATION / 02</p>
+        <h1>从一个想法，<br><span class="gradient-text">长成完整分镜。</span></h1>
+        <p class="hero-description">描述产品、人物、场景和你想要的氛围。系统会拆出完整镜头序列，并为每一镜补齐中文思路、英文 Prompt、Negative Prompt、运镜、光线与转场，直接进入创作或拍摄。</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#brief">开始写一个 Brief <span class="arrow" aria-hidden="true">↗</span></a>
+          <a class="btn btn-secondary" href="#prompt-detail">查看生成方案</a>
+        </div>
+        <div class="trust-row">
+          <span>多镜头 Prompt</span>
+          <span>中英双语结构</span>
+          <span>可导出 Markdown</span>
+        </div>
+        <p class="hero-note"><i aria-hidden="true"></i> 适合品牌短片、社媒种草、电商主图视频</p>
+      </div>
+
+      <div class="hero-art" aria-hidden="true">
+        <article class="art-stage script-stage">
+          <div class="script-head">
+            <span>PROMPT COMPOSER / 02</span>
+            <span class="art-live">READY</span>
+          </div>
+          <div class="script-title">让每一个想法，<br><em>都有完整的镜头。</em></div>
+          <div class="script-lines"><i></i><i></i><i></i></div>
+          <div class="script-frames">
+            <div class="script-frame" data-frame="01"></div>
+            <div class="script-frame" data-frame="02"></div>
+            <div class="script-frame" data-frame="03"></div>
+          </div>
+          <div class="script-prompt">
+            <span>PROMPT / SHOT 01</span>
+            <p>Macro shot · product hero · warm light · 35mm · smooth push in</p>
+          </div>
+          <div class="script-footer"><span>BRIEF → STORYBOARD → EXPORT</span><b>MODEL READY ↗</b></div>
+        </article>
+        <div class="float-card float-a"><span>STORYBOARD</span><strong>多镜头自动排布</strong></div>
+        <div class="float-card float-b"><span>CONSISTENCY</span><strong>产品与角色锁定</strong></div>
+      </div>
+    </section>
+
+    <section class="generator-grid" id="brief">
+      <section class="panel brief-panel">
+        <div class="brief-head">
+          <div>
+            <p class="panel-kicker">CREATIVE BRIEF</p>
+            <h2>描述你想拍的画面</h2>
+            <p>信息越具体，分镜和 Prompt 越接近预期。可以从产品卖点、目标人群和情绪关键词开始。</p>
+          </div>
+          <span class="model-badge">MODEL READY</span>
+        </div>
+
+        <form id="prompt-form" class="prompt-form" novalidate>
+          <div class="field-grid">
+            <label class="field wide">
+              <span class="field-label">方案名称</span>
+              <input id="prompt-title" class="input" type="text" maxlength="200" placeholder="可选，例如：清晨咖啡广告" />
+            </label>
+            <label class="field wide">
+              <span class="field-label">创意描述 · 必填</span>
+              <textarea id="prompt-idea" class="textarea" rows="6" maxlength="2000" required placeholder="例如：15 秒咖啡品牌广告，清晨厨房，暖色自然光，产品特写，安静而有质感"></textarea>
+              <span class="field-hint"><span>建议包含：时长、主体、场景、动作、光线和风格</span><b>BRIEF</b></span>
+            </label>
+          </div>
+
+          <div class="field-grid">
+            <label class="field">
+              <span class="field-label">风格</span>
+              <input id="prompt-style" class="input" type="text" maxlength="500" placeholder="广告质感 / 纪录片 / 赛博朋克" />
+            </label>
+            <label class="field">
+              <span class="field-label">情绪</span>
+              <input id="prompt-mood" class="input" type="text" maxlength="500" placeholder="温暖、安静、充满活力" />
+            </label>
+          </div>
+
+          <div class="form-section">
+            <div class="form-section-head"><span>生成设置</span><small>MODEL SETTINGS</small></div>
+            <div class="field-grid">
+              <label class="field">
+                <span class="field-label">目标模型</span>
+                <select id="prompt-model" class="input">
+                  <option value="generic">通用 / Generic</option>
+                  <option value="veo">Veo</option>
+                  <option value="runway">Runway</option>
+                  <option value="kling">可灵 / Kling</option>
+                  <option value="jimeng">即梦 / Jimeng</option>
+                  <option value="pika">Pika</option>
+                  <option value="sora">Sora</option>
+                </select>
+              </label>
+              <label class="field">
+                <span class="field-label">总时长</span>
+                <div class="input-suffix">
+                  <input id="prompt-duration" class="input" type="number" min="3" max="120" step="1" value="15" />
+                  <span>秒</span>
+                </div>
+              </label>
+              <label class="field">
+                <span class="field-label">画面比例</span>
+                <select id="prompt-aspect" class="input">
+                  <option value="9:16">9:16 竖屏</option>
+                  <option value="16:9">16:9 横屏</option>
+                  <option value="1:1">1:1 方形</option>
+                  <option value="4:3">4:3</option>
+                  <option value="21:9">21:9 宽银幕</option>
+                </select>
+              </label>
+              <label class="field">
+                <span class="field-label">镜头数</span>
+                <input id="prompt-shots" class="input" type="number" min="1" max="8" step="1" value="4" />
+              </label>
+            </div>
+          </div>
+
+          <label class="field negative-field">
+            <span class="field-label">负向提示词</span>
+            <textarea id="prompt-negative" class="textarea" rows="3" maxlength="1000" placeholder="文字、水印、畸形手指、画面抖动"></textarea>
+          </label>
+
+          <div class="brief-footer">
+            <p>Mock 模式无需 API Key<br>也会生成完整演示方案</p>
+            <button id="prompt-generate" class="btn btn-primary" type="submit">
+              <span class="button-label">生成分镜与提示词</span>
+              <span class="arrow" aria-hidden="true">↗</span>
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <aside class="panel plan-panel">
+        <div class="plan-cover">
+          <div class="plan-top"><span>STORY PLAN / READY</span><b>MODEL</b></div>
+          <div class="plan-caption"><i></i> BRIEF TO STORYBOARD</div>
+          <div class="plan-copy">
+            <h3>让每一个想法，<br>都有完整的镜头。</h3>
+            <p>SHOT PLANNING / PROMPT / EXPORT</p>
+          </div>
+        </div>
+        <div class="plan-body">
+          <div class="plan-meta">
+            <div><span>STEP 01</span><strong>拆解 Brief</strong></div>
+            <div><span>STEP 02</span><strong>规划镜头</strong></div>
+            <div><span>STEP 03</span><strong>交付导出</strong></div>
+          </div>
+          <div class="plan-frames" aria-label="分镜流程示意">
+            <div class="plan-frame tone-1"><span>01</span></div>
+            <div class="plan-frame tone-2"><span>02</span></div>
+            <div class="plan-frame tone-3"><span>03</span></div>
+            <div class="plan-frame tone-4"><span>04</span></div>
+          </div>
+          <div class="plan-foot">
+            <div class="palette-row" aria-label="方案色板"><i></i><i></i><i></i><i></i><i></i></div>
+            <span>STORYBOARD READY</span>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="workspace prompt-workspace">
+      <aside class="workspace-side">
+        <section class="panel projects-panel">
+          <div class="panel-head">
+            <div>
+              <p class="panel-kicker">STORYBOARDS</p>
+              <h2>提示词方案</h2>
+            </div>
+            <div class="panel-actions">
+              <span id="prompt-projects-count" class="count-badge">00</span>
+              <button id="prompt-refresh" class="btn btn-ghost" type="button">刷新</button>
+            </div>
+          </div>
+          <div id="prompt-projects" class="project-list">
+            <div class="panel-empty">
+              <span aria-hidden="true">✦</span>
+              <p>还没有方案</p>
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <section id="prompt-detail" class="panel result-panel detail-panel" aria-live="polite">
+        <div class="empty">
+          <span class="empty-icon" aria-hidden="true">✦</span>
+          <h3>从一个创意开始</h3>
+          <p>填写左侧 Brief，或选择已有方案查看完整分镜。</p>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <b>{{ app_name }}</b>
+        <span>把参考片变成下一次创作的起点。</span>
+      </div>
+      <div class="footer-links">
+        <button type="button" data-mode-target="reverse">逆向视频</button>
+        <button type="button" data-mode-target="generate">生成提示词</button>
+        <a href="/docs" target="_blank" rel="noreferrer">API 文档</a>
+        <span>VISUAL SYSTEM · A / B</span>
+      </div>
+    </div>
+  </footer>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  <script src="/static/app.js"></script>
+  <script src="/static/prompt.js"></script>
+</body>
+</html>

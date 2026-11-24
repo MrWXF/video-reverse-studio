@@ -1,0 +1,76 @@
+---
+title: {{ recipe.title | tojson }}
+source: {{ recipe.source_filename | tojson }}
+duration_s: {{ "%.2f" | format(recipe.duration) }}
+resolution: {{ recipe.width }}x{{ recipe.height }}
+fps: {{ "%.2f" | format(recipe.fps) }}
+shots: {{ recipe.shots | length }}
+cuts_per_minute: {{ "%.1f" | format(recipe.cuts_per_minute) }}
+pacing: {{ recipe.pacing | tojson }}
+generated_at: {{ recipe.generated_at.isoformat() | tojson }}
+generator: "reelreverse/0.1"
+---
+
+# {{ recipe.title }}
+
+> 由 ReelReverse 自动拆解。来源判定为模型推断，请人工复核。
+
+## 概览
+
+{{ recipe.summary }}
+
+| 指标 | 数值 |
+|------|------|
+| 总时长 | {{ "%.1f" | format(recipe.duration) }} 秒 |
+| 镜头数 | {{ recipe.shots | length }} |
+| 剪辑点 | {{ recipe.cut_count }} |
+| 每分钟剪辑数 | {{ "%.1f" | format(recipe.cuts_per_minute) }} |
+| 平均镜头时长 | {{ "%.1f" | format(recipe.avg_shot_seconds) }} 秒 |
+| 节奏 | {{ recipe.pacing }} |
+| 分辨率 | {{ recipe.width }}x{{ recipe.height }} |
+| 帧率 | {{ "%.1f" | format(recipe.fps) }} fps |
+
+## 镜头表
+
+| # | 时间 | 时长 | 景别 | 运镜 | 主体 | 来源 |
+|---|------|------|------|------|------|------|
+{% for shot in recipe.shots -%}
+| {{ "%02d" | format(shot.index) }} | {{ "%.1f" | format(shot.start_s) }}s–{{ "%.1f" | format(shot.end_s) }}s | {{ "%.1f" | format(shot.duration) }}s | {{ shot.shot_type }} | {{ shot.camera_movement }} | {{ shot.subject or "—" }} | {{ origin_label(shot.origin) }} |
+{% endfor %}
+
+## 逐镜复刻
+
+{% for shot in recipe.shots -%}
+### Shot {{ "%02d" | format(shot.index) }} · {{ shot.shot_type }} · {{ "%.1f" | format(shot.start_s) }}s–{{ "%.1f" | format(shot.end_s) }}s
+
+- 来源：{{ origin_label(shot.origin) }}（置信度 {{ "%.2f" | format(shot.confidence) }}）
+- 景别：{{ shot.shot_type }}
+- 运镜：{{ shot.camera_movement }}
+- 主体：{{ shot.subject or "—" }}
+- 场景：{{ shot.scene or "—" }}
+- 风格：{{ shot.visual_style or "—" }}
+- 光线：{{ shot.lighting or "—" }}
+{% if shot.color_palette -%}
+- 色板：{{ shot.color_palette | join(", ") }}
+{% endif -%}
+{% if shot.transcript -%}
+- 台词：{{ shot.transcript }}
+{% endif -%}
+{% if shot.evidence -%}
+- 判定依据：{% for item in shot.evidence %}{{ item }}{% if not loop.last %}；{% endif %}{% endfor %}
+{% endif -%}
+
+**复刻提示词**
+
+```text
+{{ shot.prompt }}
+```
+
+**复刻要点**
+
+{{ shot.remake_notes or "无" }}
+
+{% endfor %}
+---
+
+> 来源说明：filmed = 实拍，ai_generated = AI 生成，code_generated = 代码/3D 生成，unknown = 无法判断。

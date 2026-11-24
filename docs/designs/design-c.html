@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#f3ecdf">
+  <meta name="description" content="ReelReverse 前端设计方案 C：日落片场。视频逆向分析与 AI 视频提示词生成工作台。">
+  <title>ReelReverse · 日落片场 · 设计稿 C</title>
+  <link rel="stylesheet" href="shared.css">
+  <link rel="stylesheet" href="theme-c.css">
+</head>
+<body class="design-page theme-c">
+  <a class="review-link" href="index.html"><span>←</span> 返回设计总览 / DESIGN REVIEW</a>
+  <div class="ambient" aria-hidden="true"></div>
+
+  <header class="site-nav">
+    <a class="brand" href="design-c.html" aria-label="ReelReverse 工作台首页">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="16" rx="4"></rect>
+          <path d="M8 4v16M16 4v16M3 9h5M16 9h5M3 15h5M16 15h5"></path>
+        </svg>
+      </span>
+      <span class="brand-copy">
+        <strong>ReelReverse</strong>
+        <span>AI VIDEO STUDIO</span>
+      </span>
+    </a>
+
+    <div class="mode-switch" role="tablist" aria-label="工作模式">
+      <button class="is-active" type="button" role="tab" aria-selected="true" aria-controls="reverse-panel" data-mode="reverse"><span>01</span> 逆向视频</button>
+      <button type="button" role="tab" aria-selected="false" aria-controls="generate-panel" data-mode="generate"><span>02</span> 生成提示词</button>
+    </div>
+
+    <div class="nav-actions">
+      <span class="ai-status">AI ENGINE · ONLINE</span>
+      <a class="nav-cta" href="#create">开始创作 <span aria-hidden="true">↗</span></a>
+    </div>
+  </header>
+
+  <main>
+    <section class="mode-panel is-active" id="reverse-panel" data-panel="reverse" role="tabpanel" aria-label="逆向视频">
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">REVERSE ENGINEERING / 01</p>
+          <h1>把参考视频，<br><span class="gradient-text">拆成可复用的<br>创作配方。</span></h1>
+          <p class="hero-description">上传一段喜欢的视频，自动完成镜头切分、关键帧抽取、画面分析与提示词逆向。最后得到的不只是分析报告，而是一份能继续拍摄、继续生成、继续交付的创作底稿。</p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="#create">上传参考视频 <span class="arrow" aria-hidden="true">↗</span></a>
+            <a class="btn btn-secondary" href="#result">查看示例分析</a>
+          </div>
+          <div class="trust-row">
+            <span>镜头级拆解</span>
+            <span>Prompt + Negative</span>
+            <span>一键导出 Markdown</span>
+          </div>
+          <p class="hero-note"><i aria-hidden="true"></i> 支持 MP4 / MOV / WEBM · 单条最长 3 分钟</p>
+        </div>
+
+        <div class="hero-art" aria-hidden="true">
+          <article class="art-stage">
+            <div class="art-window">
+              <div class="art-window-top">
+                <span class="art-window-label">REVERSE PREVIEW / 01</span>
+                <span class="art-live">ANALYZING</span>
+              </div>
+              <div class="art-visual">
+                <span class="art-sun"></span>
+                <span class="art-horizon"></span>
+                <span class="art-grain"></span>
+                <span class="art-focus"><b>SUBJECT / 01</b><i>03.8s</i></span>
+                <div class="art-timeline"><i></i><i></i><i></i><i></i><b>00:15 / 00:15</b></div>
+              </div>
+              <div class="art-window-bottom">
+                <div class="art-caption">
+                  <strong>夏日气泡水 · 15s</strong>
+                  <span>9:16 · 24 FPS · 4 SHOTS</span>
+                </div>
+                <div class="art-wave"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+              </div>
+            </div>
+          </article>
+          <div class="float-card float-a"><span>VISION ENGINE</span><strong>6 维镜头理解</strong></div>
+          <div class="float-card float-b"><span>SUGGESTED PROMPT</span><strong>35 mm · soft light</strong></div>
+        </div>
+      </section>
+
+      <section class="stat-strip" aria-label="能力概览">
+        <div class="stat"><strong>06 <span>维</span></strong><p>景别、运镜、光线、构图、节奏与色彩</p><em>VISION</em></div>
+        <div class="stat"><strong>24 <span>镜</span></strong><p>单条视频最多拆解 24 个独立镜头</p><em>SHOTS</em></div>
+        <div class="stat"><strong>02 <span>格式</span></strong><p>Markdown 创作底稿与 JSON 结构化数据</p><em>EXPORT</em></div>
+        <div class="stat"><strong>98<span>%</span></strong><p>镜头语言分析平均可用度</p><em>QUALITY</em></div>
+      </section>
+
+      <section class="workspace">
+        <aside class="workspace-side">
+          <section class="panel upload-panel" id="create">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">NEW ANALYSIS</p>
+                <h2>上传参考视频</h2>
+              </div>
+              <span class="step-badge">01</span>
+            </div>
+            <p class="panel-intro">拖入一段 3–30 秒的高质量参考片，系统会自动识别镜头结构与可复用的视觉语言。</p>
+            <button class="dropzone" type="button" data-toast="演示稿：正式产品中会打开本地文件选择器">
+              <span class="upload-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"></path><path d="m7 9 5-5 5 5"></path><path d="M5 16v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3"></path></svg>
+              </span>
+              <strong>拖入视频，或点击选择</strong>
+              <span>MP4 / MOV / WEBM · 最大 500 MB</span>
+              <span class="file-pill"><span>brand_launch_15s.mp4</span><b>18.4 MB</b></span>
+            </button>
+            <label class="inline-field">
+              <span class="field-label">项目名称</span>
+              <input type="text" value="夏日气泡水 · 品牌首发" maxlength="80">
+            </label>
+            <button class="btn btn-primary block" type="button" data-toast="正在演示：镜头切分 → 关键帧分析 → Prompt 逆向">开始逆向分析 <span class="arrow" aria-hidden="true">↗</span></button>
+            <ul class="mini-features">
+              <li>自动切分镜头并抽取关键帧</li>
+              <li>识别景别、运镜、光线与色板</li>
+              <li>生成可复用的 Prompt 与 Negative</li>
+            </ul>
+          </section>
+
+          <section class="panel projects-panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">RECENT PROJECTS</p>
+                <h2>最近项目</h2>
+              </div>
+              <span class="step-badge">03</span>
+            </div>
+            <div class="project-list">
+              <button class="project-item is-selected" type="button" data-project="夏日气泡水 · 品牌首发" data-meta="15 秒 · 9:16 · 24 fps · 4 个镜头">
+                <span class="project-thumb tone-project-1"></span>
+                <p><strong>夏日气泡水 · 品牌首发</strong><small>15s · 4 shots · 分析完成</small></p>
+                <i aria-hidden="true">↗</i>
+              </button>
+              <button class="project-item" type="button" data-project="山野咖啡 · 清晨手冲" data-meta="22 秒 · 16:9 · 24 fps · 7 个镜头">
+                <span class="project-thumb tone-project-2"></span>
+                <p><strong>山野咖啡 · 清晨手冲</strong><small>22s · 7 shots · 分析完成</small></p>
+                <i aria-hidden="true">↗</i>
+              </button>
+              <button class="project-item" type="button" data-project="夜色骑行 · 城市漫游" data-meta="18 秒 · 9:16 · 30 fps · 5 个镜头">
+                <span class="project-thumb tone-project-3"></span>
+                <p><strong>夜色骑行 · 城市漫游</strong><small>18s · 5 shots · 待确认</small></p>
+                <i aria-hidden="true">↗</i>
+              </button>
+            </div>
+          </section>
+        </aside>
+
+        <section class="panel result-panel" id="result">
+          <div class="result-head">
+            <div>
+              <p class="panel-kicker">ANALYSIS RESULT</p>
+              <h2 id="project-title">夏日气泡水 · 品牌首发</h2>
+              <p id="project-meta">15 秒 · 9:16 · 24 fps · 4 个镜头</p>
+            </div>
+            <div class="result-actions">
+              <span class="status-pill success">分析完成</span>
+              <button class="btn btn-secondary" type="button" data-toast="演示稿：Markdown 与 JSON 已准备导出">导出创作底稿 <span aria-hidden="true">↓</span></button>
+            </div>
+          </div>
+
+          <div class="summary-grid">
+            <div class="summary-card">
+              <span>VISUAL STYLE</span>
+              <strong>夏日清透广告片</strong>
+              <p>高饱和气泡微距 + 逆光水感，产品始终处于画面视觉中心。</p>
+            </div>
+            <div class="summary-card">
+              <span>RHYTHM</span>
+              <strong>前 2 秒强钩子</strong>
+              <p>微距爆点开场，中段快速切换饮用场景，结尾回到产品英雄镜头。</p>
+            </div>
+            <div class="summary-card">
+              <span>PALETTE</span>
+              <strong>白桃 · 柠檬 · 水蓝</strong>
+              <div class="palette-inline" aria-label="主色板"><i></i><i></i><i></i><i></i><i></i></div>
+            </div>
+          </div>
+          <div class="section-bar">
+            <div><span>STORYBOARD / 4 SCENES</span><h3>镜头拆解</h3></div>
+            <button class="btn btn-ghost" type="button" data-expand-all>全部展开</button>
+          </div>
+
+          <div class="shot-list">
+            <article class="result-card tone-1">
+              <button class="shot-toggle" type="button" data-collapse aria-expanded="true">
+                <span class="shot-index">01</span>
+                <span class="shot-visual"><b>00:03</b></span>
+                <span class="shot-info">
+                  <h4>气泡升腾的大特写</h4>
+                  <p>微距镜头贴近罐身，白桃气泡从水底快速升腾，逆光把水珠打成细小光点。</p>
+                  <span class="shot-tags"><span>极特写</span><span>升格</span><span>逆光</span><span>微距</span></span>
+                </span>
+                <span class="shot-chevron" aria-hidden="true">+</span>
+              </button>
+              <div class="shot-body">
+                <div class="prompt-grid">
+                  <div class="prompt-box">
+                    <div class="prompt-box-head"><span>PROMPT</span><button type="button" data-copy-text="Close-up macro shot of a chilled peach sparkling water can, tiny bubbles rising through translucent liquid, backlit by warm afternoon sun, soft lens flare, shallow depth of field, premium commercial photography, 35mm lens, slow motion.">复制</button></div>
+                    <p>Close-up macro shot of a chilled peach sparkling water can, tiny bubbles rising through translucent liquid, backlit by warm afternoon sun, soft lens flare, shallow depth of field, premium commercial photography, 35mm lens, slow motion.</p>
+                  </div>
+                  <div class="prompt-box negative">
+                    <div class="prompt-box-head"><span>NEGATIVE</span><button type="button" data-copy-text="text, logo distortion, plastic texture, overexposed, cluttered background, extra objects">复制</button></div>
+                    <p>text, logo distortion, plastic texture, overexposed, cluttered background, extra objects</p>
+                  </div>
+                </div>
+                <div class="meta-grid">
+                  <div class="meta-item"><span>SHOT SIZE</span><strong>极特写 / ECU</strong></div>
+                  <div class="meta-item"><span>CAMERA</span><strong>缓慢推进</strong></div>
+                  <div class="meta-item"><span>LIGHTING</span><strong>逆光 + 柔光</strong></div>
+                  <div class="meta-item"><span>TRANSITION</span><strong>水花匹配剪辑</strong></div>
+                </div>
+                <div class="shot-foot">
+                  <div class="palette-dots"><i></i><i></i><i></i><i></i><i></i><span>白桃粉 / 柠檬黄 / 水蓝</span></div>
+                  <span>00:00 — 00:03 · 3.8s</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="result-card tone-2 is-collapsed">
+              <button class="shot-toggle" type="button" data-collapse aria-expanded="false">
+                <span class="shot-index">02</span>
+                <span class="shot-visual"><b>00:06</b></span>
+                <span class="shot-info">
+                  <h4>午后窗边的饮用场景</h4>
+                  <p>女生坐在窗边，阳光穿过玻璃落在瓶身与侧脸，水汽和柔光制造轻盈的夏日感。</p>
+                  <span class="shot-tags"><span>中景</span><span>手持</span><span>自然光</span><span>生活感</span></span>
+                </span>
+                <span class="shot-chevron" aria-hidden="true">+</span>
+              </button>
+              <div class="shot-body">
+                <div class="prompt-grid">
+                  <div class="prompt-box">
+                    <div class="prompt-box-head"><span>PROMPT</span><button type="button" data-copy-text="Medium shot of a young woman enjoying sparkling water by a sunlit window, warm afternoon light through sheer curtains, condensation on the bottle, candid lifestyle commercial, soft peach and cream palette, 50mm lens, natural skin texture.">复制</button></div>
+                    <p>Medium shot of a young woman enjoying sparkling water by a sunlit window, warm afternoon light through sheer curtains, condensation on the bottle, candid lifestyle commercial, soft peach and cream palette, 50mm lens, natural skin texture.</p>
+                  </div>
+                  <div class="prompt-box negative">
+                    <div class="prompt-box-head"><span>NEGATIVE</span><button type="button" data-copy-text="studio backdrop, hard flash, oversaturated skin, stiff pose, duplicated hands, text overlay">复制</button></div>
+                    <p>studio backdrop, hard flash, oversaturated skin, stiff pose, duplicated hands, text overlay</p>
+                  </div>
+                </div>
+                <div class="meta-grid">
+                  <div class="meta-item"><span>SHOT SIZE</span><strong>中景 / MS</strong></div>
+                  <div class="meta-item"><span>CAMERA</span><strong>轻微手持</strong></div>
+                  <div class="meta-item"><span>LIGHTING</span><strong>侧逆自然光</strong></div>
+                  <div class="meta-item"><span>TRANSITION</span><strong>动作顺接</strong></div>
+                </div>
+                <div class="shot-foot">
+                  <div class="palette-dots"><i></i><i></i><i></i><i></i><i></i><span>奶油白 / 蜜桃 / 暖金</span></div>
+                  <span>00:03 — 00:06 · 2.6s</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="result-card tone-3 is-collapsed">
+              <button class="shot-toggle" type="button" data-collapse aria-expanded="false">
+                <span class="shot-index">03</span>
+                <span class="shot-visual"><b>00:11</b></span>
+                <span class="shot-info">
+                  <h4>水花包裹产品的英雄镜头</h4>
+                  <p>高速摄影捕捉水花沿罐体炸开的一刻，产品保持静止，背景色彩流动。</p>
+                  <span class="shot-tags"><span>产品特写</span><span>高速摄影</span><span>水花</span></span>
+                </span>
+                <span class="shot-chevron" aria-hidden="true">+</span>
+              </button>
+              <div class="shot-body">
+                <div class="prompt-grid">
+                  <div class="prompt-box">
+                    <div class="prompt-box-head"><span>PROMPT</span><button type="button" data-copy-text="Hero product shot of a sparkling water can surrounded by a frozen crown of clear water splash, high speed photography, crisp droplets, colorful gradient background, dramatic rim light, centered composition, ultra detailed commercial CGI.">复制</button></div>
+                    <p>Hero product shot of a sparkling water can surrounded by a frozen crown of clear water splash, high speed photography, crisp droplets, colorful gradient background, dramatic rim light, centered composition, ultra detailed commercial CGI.</p>
+                  </div>
+                  <div class="prompt-box negative">
+                    <div class="prompt-box-head"><span>NEGATIVE</span><button type="button" data-copy-text="motion blur, muddy colors, clipped highlights, warped label, flat lighting, low resolution">复制</button></div>
+                    <p>motion blur, muddy colors, clipped highlights, warped label, flat lighting, low resolution</p>
+                  </div>
+                </div>
+                <div class="meta-grid">
+                  <div class="meta-item"><span>SHOT SIZE</span><strong>产品特写</strong></div>
+                  <div class="meta-item"><span>CAMERA</span><strong>高速定格</strong></div>
+                  <div class="meta-item"><span>LIGHTING</span><strong>硬质轮廓光</strong></div>
+                  <div class="meta-item"><span>TRANSITION</span><strong>速度渐变</strong></div>
+                </div>
+                <div class="shot-foot">
+                  <div class="palette-dots"><i></i><i></i><i></i><i></i><i></i><span>冰蓝 / 荧光青 / 柠檬</span></div>
+                  <span>00:06 — 00:11 · 5.1s</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="result-card tone-4 is-collapsed">
+              <button class="shot-toggle" type="button" data-collapse aria-expanded="false">
+                <span class="shot-index">04</span>
+                <span class="shot-visual"><b>00:15</b></span>
+                <span class="shot-info">
+                  <h4>品牌落版与夏日留白</h4>
+                  <p>镜头缓慢后撤，产品回到画面中央，留出品牌信息与结尾口播空间。</p>
+                  <span class="shot-tags"><span>全景</span><span>稳定器</span><span>品牌落版</span></span>
+                </span>
+                <span class="shot-chevron" aria-hidden="true">+</span>
+              </button>
+              <div class="shot-body">
+                <div class="prompt-grid">
+                  <div class="prompt-box">
+                    <div class="prompt-box-head"><span>PROMPT</span><button type="button" data-copy-text="Wide shot of the sparkling water bottle resting on a sunlit table by the sea, gentle breeze moving linen fabric, soft pastel sky, slow dolly back, generous negative space for brand copy, cinematic summer mood.">复制</button></div>
+                    <p>Wide shot of the sparkling water bottle resting on a sunlit table by the sea, gentle breeze moving linen fabric, soft pastel sky, slow dolly back, generous negative space for brand copy, cinematic summer mood.</p>
+                  </div>
+                  <div class="prompt-box negative">
+                    <div class="prompt-box-head"><span>NEGATIVE</span><button type="button" data-copy-text="busy composition, harsh shadows, fake looking ocean, text artifacts, cropped product, unstable horizon">复制</button></div>
+                    <p>busy composition, harsh shadows, fake looking ocean, text artifacts, cropped product, unstable horizon</p>
+                  </div>
+                </div>
+                <div class="meta-grid">
+                  <div class="meta-item"><span>SHOT SIZE</span><strong>全景 / WS</strong></div>
+                  <div class="meta-item"><span>CAMERA</span><strong>轨道后撤</strong></div>
+                  <div class="meta-item"><span>LIGHTING</span><strong>黄金时刻</strong></div>
+                  <div class="meta-item"><span>TRANSITION</span><strong>淡出留白</strong></div>
+                </div>
+                <div class="shot-foot">
+                  <div class="palette-dots"><i></i><i></i><i></i><i></i><i></i><span>雾紫 / 海盐蓝 / 日落金</span></div>
+                  <span>00:11 — 00:15 · 3.7s</span>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+      </section>
+
+      <section class="closing-banner">
+        <div>
+          <p class="panel-kicker">FROM REFERENCE TO RECIPE</p>
+          <h2>不是看一遍，而是真正学会它为什么有效。</h2>
+          <p>每一份分析都保留镜头、提示词、节奏与色彩依据。团队可以直接审阅，也可以把配方交给下一次生成。</p>
+        </div>
+        <div class="closing-actions">
+          <a class="btn btn-primary" href="#create">新建分析 <span aria-hidden="true">↗</span></a>
+          <button class="btn btn-secondary" type="button" data-toast="演示稿：已生成分享链接">分享给团队</button>
+        </div>
+      </section>
+    </section>
+    <section class="mode-panel" id="generate-panel" data-panel="generate" role="tabpanel" aria-label="生成提示词">
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">PROMPT GENERATION / 02</p>
+          <h1>从一个想法，<br><span class="gradient-text">长成完整分镜。</span></h1>
+          <p class="hero-description">描述产品、人物、场景和你想要的氛围。系统会拆出完整镜头序列，并为每一镜补齐中文思路、英文 Prompt、Negative Prompt、运镜、光线与转场，直接进入创作或拍摄。</p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="#brief">开始写一个 Brief <span class="arrow" aria-hidden="true">↗</span></a>
+            <a class="btn btn-secondary" href="#storyboard">查看示例分镜</a>
+          </div>
+          <div class="trust-row">
+            <span>4 个镜头 · 15 秒</span>
+            <span>中英双语 Prompt</span>
+            <span>角色与产品一致性</span>
+          </div>
+          <p class="hero-note"><i aria-hidden="true"></i> 适合品牌短片、社媒种草、电商主图视频</p>
+        </div>
+
+        <div class="hero-art" aria-hidden="true">
+          <article class="art-stage script-stage">
+            <div class="script-head">
+              <span>PROMPT COMPOSER / 02</span>
+              <span class="art-live">READY</span>
+            </div>
+            <div class="script-title">让每一口，<br><em>都有夏日的光。</em></div>
+            <div class="script-lines"><i></i><i></i><i></i></div>
+            <div class="script-frames">
+              <div class="script-frame" data-frame="01"></div>
+              <div class="script-frame" data-frame="02"></div>
+              <div class="script-frame" data-frame="03"></div>
+            </div>
+            <div class="script-prompt">
+              <span>PROMPT / SHOT 01</span>
+              <p>Macro shot · bubbles rising · backlit sun · 35mm · soft flare</p>
+            </div>
+            <div class="script-footer"><span>9:16 · 15s · 4 scenes</span><b>READY TO EXPORT ↗</b></div>
+          </article>
+          <div class="float-card float-a"><span>STORYBOARD</span><strong>4 个镜头自动排布</strong></div>
+          <div class="float-card float-b"><span>CONSISTENCY</span><strong>产品与角色锁定</strong></div>
+        </div>
+      </section>
+
+      <section class="generator-grid">
+        <section class="panel brief-panel" id="brief">
+          <div class="brief-head">
+            <div>
+              <p class="panel-kicker">CREATIVE BRIEF</p>
+              <h2>描述你想拍的画面</h2>
+              <p>信息越具体，分镜和 Prompt 越接近预期。可以从产品卖点、目标人群和情绪关键词开始。</p>
+            </div>
+            <span class="model-badge">MODEL READY</span>
+          </div>
+
+          <div class="field-grid">
+            <label class="field wide">
+              <span class="field-label">创意描述</span>
+              <textarea class="textarea">为一款白桃味气泡水做一支 15 秒竖屏品牌短片。希望画面清透、年轻、有夏日感：从气泡升腾的微距开场，切到女生在窗边饮用的生活场景，最后用海边的品牌落版收尾。整体像高端饮料广告，不要过度叫卖。</textarea>
+              <span class="field-hint"><span>建议 30–200 字</span><b>126 / 200</b></span>
+            </label>
+            <label class="field">
+              <span class="field-label">产品 / 主角</span>
+              <input class="input" type="text" value="夏日气泡水 · 白桃味">
+            </label>
+            <label class="field">
+              <span class="field-label">目标平台</span>
+              <input class="input" type="text" value="抖音 / 小红书 · 竖屏">
+            </label>
+          </div>
+
+          <div class="form-section">
+            <div class="form-section-head"><span>视觉风格</span><small>SINGLE SELECT</small></div>
+            <div class="chip-row" data-single>
+              <button class="chip is-active" type="button">清透商业广告</button>
+              <button class="chip" type="button">自然纪实</button>
+              <button class="chip" type="button">电影叙事</button>
+              <button class="chip" type="button">轻复古胶片</button>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <div class="form-section-head"><span>氛围关键词</span><small>MULTI SELECT</small></div>
+            <div class="chip-row">
+              <button class="chip accent is-active" type="button">夏日</button>
+              <button class="chip accent is-active" type="button">清透</button>
+              <button class="chip accent" type="button">轻盈</button>
+              <button class="chip accent is-active" type="button">高级感</button>
+              <button class="chip accent" type="button">治愈</button>
+              <button class="chip accent" type="button">动感</button>
+            </div>
+          </div>
+
+          <div class="field-grid">
+            <div class="field">
+              <span class="field-label">画面比例</span>
+              <div class="segmented" data-segment>
+                <button class="is-active" type="button">9:16</button>
+                <button type="button">16:9</button>
+                <button type="button">1:1</button>
+                <button type="button">4:5</button>
+              </div>
+            </div>
+            <div class="field">
+              <span class="field-label">视频时长</span>
+              <div class="segmented" data-segment>
+                <button type="button">5s</button>
+                <button class="is-active" type="button">15s</button>
+                <button type="button">30s</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="brief-footer">
+            <p>预计消耗 1 次生成额度<br>输出 4 个镜头 · 中英双语</p>
+            <button class="btn btn-primary" type="button" data-generate>生成分镜与提示词 <span class="arrow" aria-hidden="true">↗</span></button>
+          </div>
+        </section>
+
+        <aside class="panel plan-panel">
+          <div class="plan-cover">
+            <div class="plan-top"><span>STORY PLAN / V1</span><b>15 SEC</b></div>
+            <div class="plan-caption"><i></i> PEACH SPARKLING WATER</div>
+            <div class="plan-copy">
+              <h3>让每一口，<br>都有夏日的光。</h3>
+              <p>SUMMER LIGHT / PRODUCT HERO / 4 SCENES</p>
+            </div>
+          </div>
+          <div class="plan-body">
+            <div class="plan-meta">
+              <div><span>FORMAT</span><strong>9:16 竖屏</strong></div>
+              <div><span>DURATION</span><strong>15 秒</strong></div>
+              <div><span>SCENES</span><strong>4 个镜头</strong></div>
+            </div>
+            <div class="plan-frames" aria-label="分镜缩略图">
+              <div class="plan-frame tone-1"><span>01</span></div>
+              <div class="plan-frame tone-2"><span>02</span></div>
+              <div class="plan-frame tone-3"><span>03</span></div>
+              <div class="plan-frame tone-4"><span>04</span></div>
+            </div>
+            <div class="plan-foot">
+              <div class="palette-row" aria-label="方案色板"><i></i><i></i><i></i><i></i><i></i></div>
+              <span>CONSISTENCY 98%</span>
+            </div>
+          </div>
+        </aside>
+      </section>
+
+      <div class="storyboard-head" id="storyboard">
+        <div>
+          <p class="panel-kicker">GENERATED STORYBOARD</p>
+          <h2>4 个镜头，一条完整的情绪线。</h2>
+          <p>从微距钩子到品牌落版，每个镜头都带有可直接使用的 Prompt 与视觉参数。</p>
+        </div>
+        <div class="storyboard-actions">
+          <button class="btn btn-secondary" type="button" data-toast="演示稿：已复制全部 4 条 Prompt">复制全部 Prompt</button>
+          <button class="btn btn-primary" type="button" data-toast="演示稿：正在生成可下载的 Markdown 分镜文档">导出分镜 <span aria-hidden="true">↓</span></button>
+        </div>
+      </div>
+
+      <section class="storyboard-grid" aria-label="生成的分镜方案">
+        <article class="story-card tone-1">
+          <div class="story-cover">
+            <div class="story-cover-top"><span class="story-number">01</span><span class="story-time">00:00 — 00:03</span></div>
+            <div class="story-caption"><span>OPENING / MACRO</span><strong>气泡升腾</strong></div>
+          </div>
+          <div class="story-body">
+            <div class="tag-row"><span>极特写</span><span>微距</span><span>逆光</span><span>升格</span></div>
+            <div class="story-prompt">
+              <div class="story-prompt-head"><span>PROMPT</span><button type="button" data-copy-text="Close-up macro shot of a chilled peach sparkling water can, tiny bubbles rising through translucent liquid, backlit by warm afternoon sun, soft lens flare, shallow depth of field, premium commercial photography, 35mm lens, slow motion.">复制</button></div>
+              <p>Close-up macro shot of a chilled peach sparkling water can, tiny bubbles rising through translucent liquid, backlit by warm afternoon sun, soft lens flare, shallow depth of field, premium commercial photography, 35mm lens, slow motion.</p>
+              <p class="story-negative"><b>Negative:</b> text, logo distortion, plastic texture, overexposed, cluttered background</p>
+            </div>
+            <div class="story-meta">
+              <div><span>SHOT</span><strong>ECU</strong></div>
+              <div><span>CAMERA</span><strong>Push in</strong></div>
+              <div><span>LIGHT</span><strong>Backlight</strong></div>
+              <div><span>TRANSITION</span><strong>Match cut</strong></div>
+            </div>
+            <div class="story-foot">
+              <div class="palette-row"><i></i><i></i><i></i><i></i><i></i></div>
+              <span>35mm · f/2.0 · 24fps</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="story-card tone-2">
+          <div class="story-cover">
+            <div class="story-cover-top"><span class="story-number">02</span><span class="story-time">00:03 — 00:06</span></div>
+            <div class="story-caption"><span>LIFESTYLE / WINDOW</span><strong>窗边的第一口</strong></div>
+          </div>
+          <div class="story-body">
+            <div class="tag-row"><span>中景</span><span>自然光</span><span>生活感</span><span>手持</span></div>
+            <div class="story-prompt">
+              <div class="story-prompt-head"><span>PROMPT</span><button type="button" data-copy-text="Medium shot of a young woman enjoying sparkling water by a sunlit window, warm afternoon light through sheer curtains, condensation on the bottle, candid lifestyle commercial, soft peach and cream palette, 50mm lens, natural skin texture.">复制</button></div>
+              <p>Medium shot of a young woman enjoying sparkling water by a sunlit window, warm afternoon light through sheer curtains, condensation on the bottle, candid lifestyle commercial, soft peach and cream palette, 50mm lens, natural skin texture.</p>
+              <p class="story-negative"><b>Negative:</b> studio backdrop, hard flash, oversaturated skin, stiff pose, duplicated hands</p>
+            </div>
+            <div class="story-meta">
+              <div><span>SHOT</span><strong>MS</strong></div>
+              <div><span>CAMERA</span><strong>Handheld</strong></div>
+              <div><span>LIGHT</span><strong>Window</strong></div>
+              <div><span>TRANSITION</span><strong>Action cut</strong></div>
+            </div>
+            <div class="story-foot">
+              <div class="palette-row"><i></i><i></i><i></i><i></i><i></i></div>
+              <span>50mm · f/1.8 · 24fps</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="story-card tone-3">
+          <div class="story-cover">
+            <div class="story-cover-top"><span class="story-number">03</span><span class="story-time">00:06 — 00:11</span></div>
+            <div class="story-caption"><span>PRODUCT HERO / SPLASH</span><strong>水花英雄镜头</strong></div>
+          </div>
+          <div class="story-body">
+            <div class="tag-row"><span>产品特写</span><span>高速摄影</span><span>水花</span><span>CGI</span></div>
+            <div class="story-prompt">
+              <div class="story-prompt-head"><span>PROMPT</span><button type="button" data-copy-text="Hero product shot of a sparkling water can surrounded by a frozen crown of clear water splash, high speed photography, crisp droplets, colorful gradient background, dramatic rim light, centered composition, ultra detailed commercial CGI.">复制</button></div>
+              <p>Hero product shot of a sparkling water can surrounded by a frozen crown of clear water splash, high speed photography, crisp droplets, colorful gradient background, dramatic rim light, centered composition, ultra detailed commercial CGI.</p>
+              <p class="story-negative"><b>Negative:</b> motion blur, muddy colors, clipped highlights, warped label, flat lighting</p>
+            </div>
+            <div class="story-meta">
+              <div><span>SHOT</span><strong>Hero</strong></div>
+              <div><span>CAMERA</span><strong>Freeze</strong></div>
+              <div><span>LIGHT</span><strong>Rim light</strong></div>
+              <div><span>TRANSITION</span><strong>Speed ramp</strong></div>
+            </div>
+            <div class="story-foot">
+              <div class="palette-row"><i></i><i></i><i></i><i></i><i></i></div>
+              <span>85mm · f/4.0 · 120fps</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="story-card tone-4">
+          <div class="story-cover">
+            <div class="story-cover-top"><span class="story-number">04</span><span class="story-time">00:11 — 00:15</span></div>
+            <div class="story-caption"><span>ENDING / BRAND SPACE</span><strong>海边的留白</strong></div>
+          </div>
+          <div class="story-body">
+            <div class="tag-row"><span>全景</span><span>轨道后撤</span><span>黄金时刻</span><span>品牌落版</span></div>
+            <div class="story-prompt">
+              <div class="story-prompt-head"><span>PROMPT</span><button type="button" data-copy-text="Wide shot of the sparkling water bottle resting on a sunlit table by the sea, gentle breeze moving linen fabric, soft pastel sky, slow dolly back, generous negative space for brand copy, cinematic summer mood.">复制</button></div>
+              <p>Wide shot of the sparkling water bottle resting on a sunlit table by the sea, gentle breeze moving linen fabric, soft pastel sky, slow dolly back, generous negative space for brand copy, cinematic summer mood.</p>
+              <p class="story-negative"><b>Negative:</b> busy composition, harsh shadows, fake looking ocean, text artifacts, unstable horizon</p>
+            </div>
+            <div class="story-meta">
+              <div><span>SHOT</span><strong>WS</strong></div>
+              <div><span>CAMERA</span><strong>Dolly back</strong></div>
+              <div><span>LIGHT</span><strong>Golden hour</strong></div>
+              <div><span>TRANSITION</span><strong>Fade out</strong></div>
+            </div>
+            <div class="story-foot">
+              <div class="palette-row"><i></i><i></i><i></i><i></i><i></i></div>
+              <span>35mm · f/5.6 · 24fps</span>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="export-bar">
+        <div>
+          <span class="export-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>
+          </span>
+          <div><strong>方案已经可以交付</strong><span>导出包含镜头表、英文 Prompt、Negative Prompt 与参数说明的 Markdown 文档。</span></div>
+        </div>
+        <div class="export-actions">
+          <button class="btn btn-secondary" type="button" data-toast="演示稿：已复制完整 Prompt 集">复制 Prompt</button>
+          <button class="btn btn-primary" type="button" data-toast="演示稿：Markdown 分镜文档已准备下载">下载 Markdown <span aria-hidden="true">↓</span></button>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-brand"><b>ReelReverse</b><span>让参考片成为下一次创作的起点。</span></div>
+      <div class="footer-links"><a href="index.html">设计总览</a><a href="#create">逆向视频</a><a href="#brief">生成提示词</a><span>DESIGN C · 日落片场</span></div>
+    </div>
+  </footer>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="shared.js"></script>
+</body>
+</html>

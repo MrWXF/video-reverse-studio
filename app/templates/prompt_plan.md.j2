@@ -1,0 +1,81 @@
+---
+title: {{ plan.title | tojson }}
+target_model: {{ plan.target_model | tojson }}
+language: {{ plan.language | tojson }}
+duration_s: {{ "%.2f" | format(plan.duration_s) }}
+aspect_ratio: {{ plan.aspect_ratio | tojson }}
+shots: {{ plan.shots | length }}
+generated_at: {{ plan.generated_at.isoformat() | tojson }}
+generator: "reelreverse/prompt-0.1"
+---
+
+# {{ plan.title }}
+
+> 由 ReelReverse 生成。Prompt 是创作建议，实际效果取决于视频生成模型和参数。
+
+## 概览
+
+{{ plan.summary }}
+
+| 指标 | 数值 |
+|------|------|
+| 目标模型 | {{ plan.target_model }} |
+| 总时长 | {{ "%.1f" | format(plan.duration_s) }} 秒 |
+| 画幅 | {{ plan.aspect_ratio }} |
+| 镜头数 | {{ plan.shots | length }} |
+| 全局风格 | {{ plan.global_style }} |
+
+## 镜头表
+
+| # | 时间 | 时长 | 景别 | 运镜 | 主体 | 动作 | 转场 |
+|---|------|------|------|------|------|------|------|
+{% for shot in plan.shots -%}
+| {{ "%02d" | format(shot.index) }} | {{ "%.1f" | format(shot.start_s) }}s–{{ "%.1f" | format(shot.end_s) }}s | {{ "%.1f" | format(shot.duration) }}s | {{ shot.shot_type }} | {{ shot.camera_movement }} | {{ shot.subject or "—" }} | {{ shot.action or "—" }} | {{ shot.transition or "—" }} |
+{% endfor %}
+
+## 逐镜提示词
+
+{% for shot in plan.shots -%}
+### Shot {{ "%02d" | format(shot.index) }} · {{ shot.shot_type }} · {{ "%.1f" | format(shot.start_s) }}s–{{ "%.1f" | format(shot.end_s) }}s
+
+- 运镜：{{ shot.camera_movement }}
+- 主体：{{ shot.subject or "—" }}
+- 动作：{{ shot.action or "—" }}
+- 场景：{{ shot.scene or "—" }}
+- 光线：{{ shot.lighting or "—" }}
+{% if shot.color_palette -%}
+- 色板：{{ shot.color_palette | join(", ") }}
+{% endif -%}
+- 转场：{{ shot.transition or "—" }}
+
+**Prompt**
+
+```text
+{{ shot.prompt }}
+```
+
+**Negative Prompt**
+
+```text
+{{ shot.negative_prompt or "low quality, blurry, distorted anatomy, watermark, text artifacts" }}
+```
+
+**复刻要点**
+
+{{ shot.remake_notes or "无" }}
+
+{% endfor %}
+{% if plan.assumptions -%}
+## 假设
+
+{% for item in plan.assumptions -%}
+- {{ item }}
+{% endfor %}
+{% endif -%}
+{% if plan.warnings -%}
+## 提醒
+
+{% for item in plan.warnings -%}
+- {{ item }}
+{% endfor %}
+{% endif -%}

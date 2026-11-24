@@ -1,0 +1,201 @@
+/* ============================================================
+   光屿 Studio — pearl light, violet glass, warm coral accents
+   ============================================================ */
+body.theme-a {
+  --ink: #29233b;
+  --bg: #f8f5ff;
+  --muted: #746e87;
+  --accent: #6c5ce7;
+  --accent-2: #ff8798;
+  --accent-ink: #5b49db;
+  --on-accent: #ffffff;
+  --accent-soft: rgba(108, 92, 231, 0.12);
+  --line: rgba(73, 56, 129, 0.11);
+  --line-strong: rgba(73, 56, 129, 0.2);
+  --nav-bg: rgba(251, 249, 255, 0.79);
+  --surface: rgba(255, 255, 255, 0.84);
+  --surface-soft: rgba(247, 243, 255, 0.72);
+  --control-bg: rgba(244, 240, 255, 0.72);
+  --success: #14976a;
+  --success-soft: rgba(20, 151, 106, 0.11);
+  --panel-radius: 22px;
+  --card-radius: 16px;
+  --brand-radius: 14px;
+  --button-radius: 12px;
+  --brand-bg: linear-gradient(145deg, #6959e5 6%, #9d72ff 55%, #ff91a0 100%);
+  --brand-shadow: 0 12px 26px rgba(105, 89, 229, 0.27);
+  --switch-shadow: 0 7px 17px rgba(108, 92, 231, 0.22);
+  --accent-gradient: linear-gradient(135deg, #6555e7 0%, #8d6bff 48%, #ff8998 100%);
+  --accent-shadow: 0 12px 24px rgba(104, 85, 229, 0.24);
+  --accent-shadow-hover: 0 16px 33px rgba(104, 85, 229, 0.33);
+  --title-gradient: linear-gradient(102deg, #594bce 1%, #9e61f4 37%, #f98196 69%, #f1ad62 100%);
+  --glow-a: rgba(164, 139, 255, 0.3);
+  --glow-b: rgba(255, 155, 167, 0.24);
+  --glow-c: rgba(85, 205, 219, 0.13);
+  --grid-color: rgba(91, 73, 161, 0.035);
+  --panel-shadow: 0 16px 42px rgba(79, 56, 144, 0.065);
+  --dropzone-bg: linear-gradient(145deg, rgba(246, 241, 255, 0.96), rgba(255, 249, 250, 0.94));
+  --prompt-bg: linear-gradient(145deg, rgba(247, 244, 255, 0.88), rgba(255, 250, 251, 0.86));
+  --banner-bg: linear-gradient(120deg, rgba(255, 255, 255, 0.94), rgba(245, 240, 255, 0.92) 56%, rgba(255, 239, 243, 0.9));
+  --export-bg: linear-gradient(120deg, rgba(255, 255, 255, 0.92), rgba(250, 244, 253, 0.92));
+  --plan-bg: radial-gradient(circle at 79% 18%, #ffb4c5 0, transparent 35%), linear-gradient(142deg, #7864e7 0%, #8667d8 36%, #f18683 100%);
+  --plan-orb-a: radial-gradient(circle, #fff2b8 0, #ffa6c7 50%, transparent 72%);
+  --plan-orb-b: radial-gradient(circle, #b8f5ff 0, #6386fb 52%, transparent 74%);
+  --shot-bg: linear-gradient(145deg, #cdbdff, #ffb8c4);
+  --shot-orb: rgba(255, 238, 190, 0.78);
+  --shot-land: rgba(103, 89, 195, 0.43);
+  --thumb: linear-gradient(145deg, #d0c1ff, #ffbec7);
+  --thumb-orb: rgba(255, 244, 178, 0.72);
+  --thumb-orb-2: rgba(109, 96, 214, 0.42);
+  --swatch-1: #6b5be5;
+  --swatch-2: #ff8b9b;
+  --swatch-3: #ffd879;
+  --swatch-4: #77d7d9;
+  --swatch-5: #b488ff;
+  --review-line: rgba(108, 92, 231, 0.22);
+  --review-text: #514876;
+  --review-bg: rgba(255, 255, 255, 0.8);
+  --review-shadow: 0 14px 30px rgba(86, 66, 154, 0.13);
+  --art-halo: radial-gradient(circle, #cbb9ff 0, #ffb5c4 52%, transparent 72%);
+  --art-line: rgba(255, 255, 255, 0.78);
+  --art-radius: 34px;
+  --art-bg: linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgba(239, 230, 255, 0.86));
+  --art-shadow: 0 32px 68px rgba(93, 71, 158, 0.16), inset 0 1px 0 #ffffff;
+  --art-glow: linear-gradient(135deg, #c7b4ff, #aee7ff 48%, #ffc2ca);
+  --art-window-line: rgba(255, 255, 255, 0.35);
+  --art-window-bg: rgba(30, 25, 52, 0.95);
+  --art-window-shadow: 0 25px 64px rgba(43, 31, 90, 0.34);
+  --art-copy: #ffffff;
+  --art-copy-soft: rgba(255, 255, 255, 0.62);
+  --art-visual: linear-gradient(160deg, #bbd9ff 0%, #f4b6e5 40%, #ffad8d 72%, #4b4f9c 100%);
+  --art-orb-a: radial-gradient(circle, #ffd7e2 0, #ffc8aa 52%, transparent 72%);
+  --art-orb-b: radial-gradient(circle, #bdf4ff 0, #6b91ff 48%, transparent 72%);
+  --art-sun: rgba(255, 237, 192, 0.78);
+  --art-horizon: linear-gradient(180deg, #5b4a91, #272451 84%);
+  --art-prompt-bg: rgba(255, 255, 255, 0.065);
+  --float-line: rgba(255, 255, 255, 0.8);
+  --float-radius: 15px;
+  --float-text: #302748;
+  --float-bg: rgba(255, 255, 255, 0.8);
+  --float-shadow: 0 20px 38px rgba(82, 62, 149, 0.17);
+  --float-muted: #88809c;
+  background:
+    linear-gradient(180deg, rgba(255, 252, 255, 0.95), rgba(249, 245, 255, 0.84) 40%, rgba(255, 250, 248, 0.94)),
+    #f8f5ff;
+}
+
+body.theme-a .brand-copy strong {
+  background: linear-gradient(110deg, #33294f, #6b57d9 72%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+body.theme-a .hero h1 {
+  text-wrap: balance;
+}
+
+body.theme-a .hero h1 .gradient-text {
+  filter: saturate(1.05);
+}
+
+body.theme-a .hero-art::before {
+  animation: halo-a 9s ease-in-out infinite alternate;
+}
+
+@keyframes halo-a {
+  from { transform: translate3d(-4px, 3px, 0) scale(0.97) rotate(-2deg); }
+  to { transform: translate3d(8px, -7px, 0) scale(1.06) rotate(4deg); }
+}
+
+body.theme-a .art-stage {
+  transform: rotate(1.2deg);
+}
+
+body.theme-a .art-window {
+  border-radius: 25px;
+}
+
+body.theme-a .float-card {
+  box-shadow: 0 17px 36px rgba(82, 62, 149, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+body.theme-a .panel,
+body.theme-a .result-panel,
+body.theme-a .story-card,
+body.theme-a .closing-banner {
+  backdrop-filter: blur(18px);
+}
+
+body.theme-a .btn-primary {
+  position: relative;
+  overflow: hidden;
+}
+
+body.theme-a .btn-primary::after {
+  position: absolute;
+  top: -40%;
+  left: -30%;
+  width: 28%;
+  height: 180%;
+  content: "";
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.28), transparent);
+  transform: rotate(18deg);
+  transition: left 420ms ease;
+}
+
+body.theme-a .btn-primary:hover::after {
+  left: 110%;
+}
+
+body.theme-a .dropzone .file-pill {
+  background: rgba(255, 255, 255, 0.62);
+}
+
+body.theme-a .project-item.is-selected {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72), 0 7px 18px rgba(84, 62, 148, 0.05);
+}
+
+body.theme-a .shot-visual,
+body.theme-a .story-cover {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+body.theme-a .section-bar {
+  background: linear-gradient(90deg, rgba(247, 243, 255, 0.9), rgba(255, 247, 249, 0.75));
+}
+
+body.theme-a .plan-cover {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+body.theme-a .plan-cover h3 {
+  text-shadow: 0 2px 20px rgba(51, 38, 106, 0.24);
+}
+
+body.theme-a .closing-banner {
+  position: relative;
+  isolation: isolate;
+}
+
+body.theme-a .closing-banner::after {
+  position: absolute;
+  top: -48px;
+  right: 9%;
+  z-index: -1;
+  width: 190px;
+  height: 190px;
+  border-radius: 50%;
+  content: "";
+  background: radial-gradient(circle, rgba(255, 151, 168, 0.22), transparent 68%);
+}
+
+body.theme-a .review-link {
+  backdrop-filter: blur(20px) saturate(130%);
+}
+
+@media (max-width: 720px) {
+  body.theme-a .art-stage {
+    transform: none;
+  }
+}
