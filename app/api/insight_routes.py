@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import Counter
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -16,7 +18,7 @@ from ..schemas import (
     ShotTemplateSave,
 )
 from ..serializers import prompt_project_payload
-from ..services import cost, prompt_versions
+from ..services import cost, prompt_versions, quality
 from ..services import shot_templates as template_service
 
 router = APIRouter()
@@ -82,6 +84,21 @@ def estimate_project_cost(payload: CostEstimateRequest) -> dict:
     )
 
 
+@router.get(
+    "/api/insights/quality",
+    summary="分析质量仪表盘",
+    description=(
+        "聚合窗口内活跃项目的镜头修正率、来源判定修正、字段修正频率、"
+        "分析耗时和 token 消耗。指标基于人工编辑事件，不等同于模型真实准确率。"
+    ),
+)
+def quality_dashboard(
+    days: int = Query(default=30, ge=7, le=90),
+    db: Session = Depends(get_db),
+) -> dict:
+    return quality.build_quality_dashboard(db, days=days)
+
+
 @router.get("/api/projects/{project_id}/edit-events")
 def list_edit_events(
     project_id: str,
@@ -140,17 +157,32 @@ def save_shot_template(
 def list_shot_templates(
     search: str = "",
     category: str = "",
+    tags: list[str] | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     templates = db.scalars(
-        select(ShotTemplate).order_by(ShotTemplate.created_at.desc()).limit(limit * 4)
+        select(ShotTemplate).order_by(ShotTemplate.created_at.desc()).limit(1000)
     ).all()
     query = search.strip().casefold()
     selected_category = category.strip().casefold()
+    raw_tags = [
+        item.strip()
+        for value in (tags or [])
+        for item in str(value).split(",")
+        if item.strip()
+    ]
+    selected_tags = {
+        item.casefold() for item in template_service.normalize_tags(raw_tags)
+    }
     result: list[dict] = []
     for template in templates:
         if selected_category and template.category.casefold() != selected_category:
+            continue
+        template_tags = {
+            str(tag).strip().casefold() for tag in (template.tags or []) if str(tag).strip()
+        }
+        if selected_tags and not selected_tags.issubset(template_tags):
             continue
         if query:
             haystack = " ".join(
@@ -162,6 +194,9 @@ def list_shot_templates(
                     template.camera_movement,
                     template.lighting,
                     template.visual_style,
+                    template.prompt_template,
+                    template.negative_prompt,
+                    template.remake_notes,
                     " ".join(template.tags or []),
                 ]
             ).casefold()
@@ -171,6 +206,34 @@ def list_shot_templates(
         if len(result) >= limit:
             break
     return result
+
+
+@router.get("/api/shot-templates/facets")
+def shot_template_facets(db: Session = Depends(get_db)) -> dict:
+    templates = db.scalars(select(ShotTemplate)).all()
+    categories: Counter[str] = Counter()
+    tags: Counter[str] = Counter()
+    for template in templates:
+        categories[template.category or "自定义"] += 1
+        for tag in template.tags or []:
+            normalized = str(tag).strip()
+            if normalized:
+                tags[normalized] += 1
+    return {
+        "total": len(templates),
+        "categories": [
+            {"value": value, "count": count}
+            for value, count in sorted(
+                categories.items(), key=lambda item: (-item[1], item[0].casefold())
+            )
+        ],
+        "tags": [
+            {"value": value, "count": count}
+            for value, count in sorted(
+                tags.items(), key=lambda item: (-item[1], item[0].casefold())
+            )
+        ],
+    }
 
 
 @router.delete("/api/shot-templates/{template_id}")

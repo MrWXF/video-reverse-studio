@@ -7,6 +7,7 @@ const state = {
   sseFailures: 0,
   refreshPending: false,
   estimateSeq: 0,
+  qualityLoading: false,
 };
 let recipeCache = { jobId: null, text: "" };
 
@@ -156,6 +157,185 @@ async function loadCostEstimate(file) {
   } catch (error) {
     if (sequence !== state.estimateSeq || state.file !== file) return;
     body.innerHTML = '<p class="cost-estimate-note">成本预估暂不可用：' + esc(error.message) + '</p>';
+  }
+}
+
+function formatPercent(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+  return (Number(value) * 100).toFixed(1) + "%";
+}
+
+function formatDurationSeconds(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+  const seconds = Math.max(0, Number(value));
+  if (seconds < 60) return formatNumber(seconds, 1) + "s";
+  const minutes = Math.floor(seconds / 60);
+  return minutes + "m " + formatNumber(seconds - minutes * 60, 0) + "s";
+}
+
+function qualityKpiMarkup(label, value, detail, tone = "") {
+  return (
+    '<article class="quality-kpi ' + tone + '">' +
+      '<span>' + esc(label) + '</span>' +
+      '<strong>' + esc(value) + '</strong>' +
+      '<small>' + esc(detail) + '</small>' +
+    '</article>'
+  );
+}
+
+function renderQualitySummary(data) {
+  const summary = data.summary || {};
+  const box = $("#quality-kpis");
+  const accuracy = summary.origin_accuracy;
+  const correctionRate = summary.correction_rate;
+  const accuracyTone = accuracy !== null && accuracy !== undefined && accuracy < 0.85 ? "is-warning" : "is-good";
+  const correctionTone = correctionRate !== null && correctionRate !== undefined && correctionRate > 0.3 ? "is-warning" : "";
+  if (!box) return;
+  box.innerHTML =
+    qualityKpiMarkup(
+      "来源判定准确率",
+      formatPercent(accuracy),
+      (summary.origin_corrections || 0) + " 镜发生来源修正 · 基于人工编辑",
+      accuracyTone,
+    ) +
+    qualityKpiMarkup(
+      "镜头修正率",
+      formatPercent(correctionRate),
+      (summary.edited_shots || 0) + " / " + (summary.shots || 0) + " 镜被人工修改",
+      correctionTone,
+    ) +
+    qualityKpiMarkup(
+      "平均处理时长",
+      formatDurationSeconds(summary.average_processing_seconds),
+      (summary.analysis_runs || 0) + " 次完成分析",
+      "",
+    ) +
+    qualityKpiMarkup(
+      "TOKEN 消耗",
+      compactNumber(summary.total_tokens || 0),
+      (summary.total_calls || 0) + " 次模型调用 · input + output",
+      "",
+    );
+}
+
+function renderQualityFields(data) {
+  const fields = data.fields || [];
+  const box = $("#quality-fields-body");
+  const total = $("#quality-field-total");
+  const totalCount = fields.reduce((sum, item) => sum + Number(item.count || 0), 0);
+  if (total) total.textContent = totalCount + " 次";
+  if (!box) return;
+  if (!fields.length) {
+    box.innerHTML = '<p class="quality-empty">还没有字段修正记录。编辑镜头后，这里会显示最容易出错的字段。</p>';
+    return;
+  }
+  const maximum = Math.max(...fields.map((item) => Number(item.count || 0)), 1);
+  box.innerHTML = fields.map((item) => {
+    const width = Math.max(3, (Number(item.count || 0) / maximum) * 100);
+    return (
+      '<div class="quality-field-row">' +
+        '<div class="quality-field-copy"><strong>' + esc(item.label) + '</strong>' +
+          '<span>' + esc(item.count) + ' 次 · ' + esc(item.affected_shots || 0) + ' 镜 · 修正率 ' + esc(formatPercent(item.rate)) + '</span></div>' +
+        '<div class="quality-field-bar" aria-hidden="true"><i style="width:' + width.toFixed(1) + '%"></i></div>' +
+      '</div>'
+    );
+  }).join("");
+}
+
+function renderQualityTrend(data) {
+  const trend = data.trend || [];
+  const box = $("#quality-trend-body");
+  if (!box) return;
+  if (!trend.length) {
+    box.innerHTML = '<p class="quality-empty">时间窗口内没有趋势数据。</p>';
+    return;
+  }
+  const maximum = Math.max(...trend.map((item) => Number(item.field_corrections || 0)), 1);
+  const labelStep = Math.max(1, Math.ceil(trend.length / 7));
+  const columns = trend.map((item, index) => {
+    const total = Number(item.field_corrections || 0);
+    const origin = Number(item.origin_corrections || 0);
+    const height = total ? Math.max(4, (total / maximum) * 100) : 0;
+    const originHeight = total ? Math.max(0, (origin / total) * 100) : 0;
+    const showLabel = index % labelStep === 0 || index === trend.length - 1;
+    const label = showLabel ? item.date.slice(5) : "";
+    const title = item.date + " · " + total + " 个字段修正 · " + (item.edit_events || 0) + " 次编辑";
+    return (
+      '<div class="quality-trend-column" title="' + esc(title) + '">' +
+        '<span class="quality-trend-bar" style="height:' + height.toFixed(1) + '%">' +
+          '<i style="height:' + originHeight.toFixed(1) + '%"></i></span>' +
+        '<b>' + esc(label) + '</b>' +
+      '</div>'
+    );
+  }).join("");
+  box.innerHTML =
+    '<div class="quality-trend-chart" style="--trend-cols:' + trend.length + '">' + columns + '</div>' +
+    '<div class="quality-trend-legend"><span><i class="is-total"></i>字段修正</span><span><i class="is-origin"></i>来源修正</span></div>' +
+    '<p class="quality-trend-note">柱高表示当天字段修正总量，深色部分为来源判定修正。</p>';
+}
+
+function renderQualityProjects(data) {
+  const projects = data.projects || [];
+  const box = $("#quality-projects-body");
+  if (!box) return;
+  if (!projects.length) {
+    box.innerHTML = '<p class="quality-empty">窗口内没有可展示的项目。</p>';
+    return;
+  }
+  box.innerHTML = projects.map((project) => {
+    return (
+      '<div class="quality-project-row">' +
+        '<div class="quality-project-copy"><strong>' + esc(project.title) + '</strong>' +
+          '<small>' + esc(project.shot_count) + ' 镜 · ' + esc(STATUS_LABELS[project.status] || project.status) + '</small></div>' +
+        '<div class="quality-project-stats">' +
+          '<span><b>' + esc(project.edit_events) + '</b> 事件</span>' +
+          '<span><b>' + esc(project.edited_shots) + '</b> 修正镜</span>' +
+          '<span><b>' + esc(project.origin_corrections) + '</b> 来源</span>' +
+        '</div>' +
+        '<button class="btn btn-ghost" type="button" data-quality-project="' + esc(project.id) + '">查看项目</button>' +
+      '</div>'
+    );
+  }).join("");
+}
+
+function renderQualitySuggestions(data) {
+  const suggestions = data.suggestions || [];
+  const box = $("#quality-suggestions-body");
+  if (!box) return;
+  box.innerHTML = suggestions.length
+    ? '<ul class="quality-suggestion-list">' + suggestions.map((item, index) => '<li><b>' + String(index + 1).padStart(2, "0") + '</b><span>' + esc(item) + '</span></li>').join("") + '</ul>'
+    : '<p class="quality-empty">暂无可展示的建议。</p>';
+}
+
+async function loadQualityDashboard(force = false) {
+  const view = $("#quality-view");
+  if (!view || state.qualityLoading) return;
+  state.qualityLoading = true;
+  view.classList.add("is-loading");
+  try {
+    const data = await api("/api/insights/quality?days=30");
+    renderQualitySummary(data);
+    renderQualityFields(data);
+    renderQualityTrend(data);
+    renderQualityProjects(data);
+    renderQualitySuggestions(data);
+    const windowLabel = $("#quality-window-label");
+    const windowNote = $("#quality-window-note");
+    if (windowLabel) windowLabel.textContent = "近 " + data.window.days + " 天";
+    if (windowNote) {
+      windowNote.textContent =
+        data.summary.projects + " 个活跃项目 · " + data.summary.shots + " 个镜头 · " +
+        data.summary.edit_events + " 次人工修正";
+    }
+  } catch (error) {
+    const box = $("#quality-kpis");
+    if (box) {
+      box.innerHTML = '<article class="quality-kpi is-warning"><span>QUALITY DATA</span><strong>读取失败</strong><small>' + esc(error.message) + '</small></article>';
+    }
+    if (force) toast(error.message);
+  } finally {
+    state.qualityLoading = false;
+    view.classList.remove("is-loading");
   }
 }
 
@@ -654,6 +834,7 @@ function openTemplateDialog(projectId, shotId) {
   $("#template-description").value = "";
   $("#template-category").value = "自定义";
   $("#template-tags").value = "";
+  $("#template-prompt-template").value = String((shot.analysis || {}).prompt || "");
   $("#template-preview").innerHTML = templatePreviewMarkup(shot);
   if (typeof dialog.showModal === "function") {
     dialog.showModal();
@@ -677,6 +858,20 @@ function bindTemplateDialog() {
   if (!dialog || !form) return;
   dialog.addEventListener("click", (event) => {
     if (event.target === dialog) closeTemplateDialog();
+    const placeholder = event.target.closest("[data-insert-template-placeholder]");
+    if (!placeholder) return;
+    const input = $("#template-prompt-template");
+    if (!input) return;
+    const token = placeholder.dataset.insertTemplatePlaceholder || "";
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? start;
+    if (typeof input.setRangeText === "function") {
+      input.setRangeText(token, start, end, "end");
+    } else {
+      input.value = input.value.slice(0, start) + token + input.value.slice(end);
+    }
+    input.focus();
+    input.setSelectionRange(start + token.length, start + token.length);
   });
   dialog.querySelectorAll("[data-close-template]").forEach((button) => {
     button.addEventListener("click", closeTemplateDialog);
@@ -705,6 +900,7 @@ function bindTemplateDialog() {
             description: $("#template-description").value.trim(),
             category: $("#template-category").value.trim() || "自定义",
             tags: $("#template-tags").value.split(/[,，]/).map((item) => item.trim()).filter(Boolean),
+            prompt_template: $("#template-prompt-template").value.trim(),
           }),
         }
       );
@@ -881,6 +1077,8 @@ document.addEventListener("DOMContentLoaded", () => {
   bindDropzone();
   bindDetail();
   bindTemplateDialog();
+  window.loadQualityDashboard = loadQualityDashboard;
+  window.openReverseProject = openProject;
   $("#upload").addEventListener("click", upload);
   $("#refresh").addEventListener("click", () => {
     loadProjects().catch((error) => toast(error.message));
@@ -894,6 +1092,16 @@ document.addEventListener("DOMContentLoaded", () => {
       const target = document.querySelector('.mode-tab[data-view="' + button.dataset.modeTarget + '"]');
       if (target) target.click();
     });
+  });
+  document.querySelectorAll("[data-quality-refresh]").forEach((button) => {
+    button.addEventListener("click", () => loadQualityDashboard(true));
+  });
+  $("#quality-view")?.addEventListener("click", (event) => {
+    const projectButton = event.target.closest("[data-quality-project]");
+    if (!projectButton) return;
+    const target = document.querySelector('.mode-tab[data-view="reverse"]');
+    if (target) target.click();
+    window.openReverseProject?.(projectButton.dataset.qualityProject);
   });
   loadProjects().catch((error) => toast(error.message));
 });

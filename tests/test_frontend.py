@@ -67,9 +67,21 @@ def test_frontend_assets_expose_design_system_hooks():
     assert "data-prompt-shot-editor" in prompt_js
     assert "data-entity-form" in prompt_js
     assert "data-restore-version" in prompt_js
+    assert "data-version-compare" in prompt_js
+    assert "comparePromptVersions" in prompt_js
+    assert "data-toggle-share-qr" in prompt_js
+    assert ".version-compare-kpis" in css
+    assert ".share-qr-card" in css
     assert "comparison-summary" in prompt_js
     assert ".prompt-studio-tools" in css
     assert ".field-locks" in css
+    assert 'id="template-prompt-template"' in html
+    assert "data-insert-template-placeholder" in html
+    assert "template-category-filter" in prompt_js
+    assert "template-tag-filters" in prompt_js
+    assert "/api/shot-templates/facets" in prompt_js
+    assert ".template-tag-chip.is-selected" in css
+    assert ".template-placeholder-badge" in css
     assert "global.ReelReverse" in shared_js
     assert "window.ReelReverse" in app_js
     assert "window.ReelReverse" in prompt_js

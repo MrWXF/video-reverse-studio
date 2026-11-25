@@ -43,6 +43,9 @@
       <button class="mode-tab" type="button" role="tab" aria-selected="false" data-view="generate">
         <span>02</span> 生成提示词
       </button>
+      <button class="mode-tab" type="button" role="tab" aria-selected="false" data-view="quality">
+        <span>03</span> 质量洞察
+      </button>
     </nav>
 
     <div class="nav-actions">
@@ -411,6 +414,72 @@
     </section>
   </main>
 
+  <main id="quality-view" class="view hidden" role="tabpanel" aria-label="分析质量仪表盘">
+    <section class="quality-page">
+      <header class="quality-hero">
+        <div class="quality-hero-copy">
+          <p class="eyebrow">QUALITY INTELLIGENCE / 03</p>
+          <h1>让每一次修正，<br><span class="gradient-text">变成下一次判断。</span></h1>
+          <p class="hero-description">把人工修正、处理耗时和 token 消耗汇总成可读的质量信号。它不宣称模型百分之百准确，而是帮助团队发现最值得优化的镜头字段和工作环节。</p>
+          <div class="hero-actions">
+            <button class="btn btn-primary" type="button" data-quality-refresh>刷新质量数据 <span class="arrow" aria-hidden="true">↻</span></button>
+            <button class="btn btn-secondary" type="button" data-mode-target="reverse">返回视频分析</button>
+          </div>
+        </div>
+        <aside class="quality-hero-card">
+          <p class="panel-kicker">QUALITY SIGNAL</p>
+          <strong id="quality-window-label">近 30 天</strong>
+          <p id="quality-window-note">正在读取质量数据…</p>
+          <div class="quality-live"><i aria-hidden="true"></i><span>EDIT EVENT SIGNAL</span></div>
+        </aside>
+      </header>
+
+      <section id="quality-kpis" class="quality-kpis" aria-live="polite">
+        <article class="quality-kpi"><span>LOADING</span><strong>—</strong><small>正在聚合质量指标</small></article>
+      </section>
+
+      <section class="quality-grid">
+        <article class="panel quality-panel">
+          <div class="quality-panel-head">
+            <div><p class="panel-kicker">FIELD SIGNALS</p><h2>字段修正频率</h2></div>
+            <span id="quality-field-total" class="count-badge">—</span>
+          </div>
+          <div id="quality-fields-body" class="quality-fields-body">
+            <p class="quality-empty">正在读取字段修正数据…</p>
+          </div>
+        </article>
+        <article class="panel quality-panel">
+          <div class="quality-panel-head">
+            <div><p class="panel-kicker">EDIT TREND</p><h2>近 30 天修正趋势</h2></div>
+            <span class="quality-legend"><i></i>来源修正</span>
+          </div>
+          <div id="quality-trend-body" class="quality-trend-body">
+            <p class="quality-empty">正在生成趋势图…</p>
+          </div>
+        </article>
+      </section>
+
+      <section class="quality-grid">
+        <article class="panel quality-panel">
+          <div class="quality-panel-head">
+            <div><p class="panel-kicker">PROJECT BREAKDOWN</p><h2>项目质量明细</h2></div>
+          </div>
+          <div id="quality-projects-body" class="quality-projects-body">
+            <p class="quality-empty">正在读取项目数据…</p>
+          </div>
+        </article>
+        <article class="panel quality-panel quality-suggestions-panel">
+          <div class="quality-panel-head">
+            <div><p class="panel-kicker">NEXT ACTION</p><h2>系统建议</h2></div>
+          </div>
+          <div id="quality-suggestions-body" class="quality-suggestions-body">
+            <p class="quality-empty">正在分析改进方向…</p>
+          </div>
+        </article>
+      </section>
+    </section>
+  </main>
+
   <footer class="site-footer">
     <div class="footer-inner">
       <div class="footer-brand">
@@ -420,6 +489,7 @@
       <div class="footer-links">
         <button type="button" data-mode-target="reverse">逆向视频</button>
         <button type="button" data-mode-target="generate">生成提示词</button>
+        <button type="button" data-mode-target="quality">质量洞察</button>
         <a href="/docs" target="_blank" rel="noreferrer">API 文档</a>
         <span>VISUAL SYSTEM · A / B</span>
       </div>
@@ -443,6 +513,22 @@
             <input id="template-tags" class="input" type="text" placeholder="广告、产品、暖光" /></label>
           <label class="field wide"><span class="field-label">说明</span>
             <textarea id="template-description" class="textarea" rows="2" maxlength="1000" placeholder="这个模板适合什么场景？"></textarea></label>
+          <label class="field wide"><span class="field-label">Prompt 模板（支持占位符）</span>
+            <textarea id="template-prompt-template" class="textarea template-prompt-input" rows="4" maxlength="8000" placeholder="用占位符替换主体、场景和光线，例如：特写 of the product in the scene"></textarea></label>
+          <div class="template-placeholder-panel wide">
+            <span class="field-label">插入占位符</span>
+            <div class="template-placeholder-chips">
+              <button type="button" data-insert-template-placeholder="&#123;&#123;subject&#125;&#125;">主体</button>
+              <button type="button" data-insert-template-placeholder="&#123;&#123;scene&#125;&#125;">场景</button>
+              <button type="button" data-insert-template-placeholder="&#123;&#123;lighting&#125;&#125;">光线</button>
+              <button type="button" data-insert-template-placeholder="&#123;&#123;shot_type&#125;&#125;">景别</button>
+              <button type="button" data-insert-template-placeholder="&#123;&#123;camera_movement&#125;&#125;">运镜</button>
+              <button type="button" data-insert-template-placeholder="&#123;&#123;action&#125;&#125;">动作</button>
+              <button type="button" data-insert-template-placeholder="&#123;&#123;global_style&#125;&#125;">全局风格</button>
+              <button type="button" data-insert-template-placeholder="&#123;&#123;aspect_ratio&#125;&#125;">画幅</button>
+            </div>
+            <small>套用时按目标镜头与方案上下文替换；未知占位符会保留并写入提示。</small>
+          </div>
         </div>
       </div>
       <div class="template-dialog-actions">

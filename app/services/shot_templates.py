@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from ..models import Shot, ShotTemplate
 from ..schemas import PromptPlan, ShotTemplateApply, ShotTemplateSave
 
@@ -14,6 +16,16 @@ STYLE_FIELDS = (
 )
 PROMPT_FIELDS = ("prompt", "negative_prompt", "remake_notes")
 ALLOWED_FIELDS = STYLE_FIELDS + PROMPT_FIELDS
+TEXT_FIELDS = (
+    "shot_type",
+    "camera_movement",
+    "lighting",
+    "transition",
+    "prompt_template",
+    "negative_prompt",
+    "remake_notes",
+)
+PLACEHOLDER_RE = re.compile(r"{{\s*([A-Za-z0-9_.-]+)\s*}}")
 
 
 def _clean_tags(values: list[str]) -> list[str]:
@@ -23,6 +35,63 @@ def _clean_tags(values: list[str]) -> list[str]:
         if tag and tag not in tags:
             tags.append(tag)
     return tags[:20]
+
+
+def normalize_tags(values: list[str] | None) -> list[str]:
+    return _clean_tags(values or [])
+
+
+def placeholders_in(value: str | None) -> list[str]:
+    return sorted(set(PLACEHOLDER_RE.findall(value or "")))
+
+
+def _context_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return ", ".join(_context_text(item) for item in value if _context_text(item))
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _shot_context(plan: PromptPlan, shot) -> dict:
+    context = {
+        "title": plan.title,
+        "summary": plan.summary,
+        "target_model": plan.target_model,
+        "language": _context_text(plan.language),
+        "duration_s": plan.duration_s,
+        "aspect_ratio": plan.aspect_ratio,
+        "global_style": plan.global_style,
+    }
+    for key, value in shot.model_dump(mode="json").items():
+        context[key] = _context_text(value)
+    context["index"] = context.get("index", "")
+    context["shot_index"] = context.get("index", "")
+    return context
+
+
+def _render_placeholders(value: str, context: dict, warnings: list[str]) -> str:
+    unknown: list[str] = []
+    empty: list[str] = []
+
+    def replace(match: re.Match) -> str:
+        key = match.group(1)
+        if key not in context:
+            unknown.append(key)
+            return match.group(0)
+        rendered = _context_text(context[key])
+        if rendered == "":
+            empty.append(key)
+        return rendered
+
+    rendered = PLACEHOLDER_RE.sub(replace, value)
+    for key in dict.fromkeys(unknown):
+        warnings.append("模板包含未知占位符 {{" + key + "}}，已原样保留。")
+    for key in dict.fromkeys(empty):
+        warnings.append("模板占位符 {{" + key + "}} 没有可用值，已替换为空。")
+    return rendered
 
 
 def template_from_shot(
@@ -44,7 +113,11 @@ def template_from_shot(
             for color in (analysis.get("color_palette") or [])
             if str(color).strip()
         ],
-        prompt_template=str(analysis.get("prompt") or ""),
+        prompt_template=(
+            payload.prompt_template
+            if payload.prompt_template is not None
+            else str(analysis.get("prompt") or "")
+        ),
         negative_prompt=str(analysis.get("negative_prompt") or ""),
         transition=str(analysis.get("transition") or "")[:100],
         remake_notes=str(analysis.get("remake_notes") or ""),
@@ -76,6 +149,7 @@ def apply_template(
 
     applied = 0
     for shot in target_shots:
+        context = _shot_context(plan, shot)
         for field in requested:
             value = getattr(
                 template,
@@ -84,14 +158,19 @@ def apply_template(
             )
             if value in (None, "", []):
                 continue
+            if isinstance(value, str) and "{{" in value:
+                value = _render_placeholders(value, context, warnings)
             setattr(shot, field, value)
             applied += 1
     if not applied:
         warnings.append("模板没有可应用的内容")
-    return warnings
+    return list(dict.fromkeys(warnings))
 
 
 def template_payload(template: ShotTemplate) -> dict:
+    placeholders = placeholders_in(
+        " ".join(str(getattr(template, field) or "") for field in TEXT_FIELDS)
+    )
     return {
         "id": template.id,
         "name": template.name,
@@ -115,4 +194,6 @@ def template_payload(template: ShotTemplate) -> dict:
         "updated_at": template.updated_at.isoformat()
         if template.updated_at
         else None,
+        "has_placeholders": bool(placeholders),
+        "placeholders": placeholders,
     }

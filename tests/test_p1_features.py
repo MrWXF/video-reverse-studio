@@ -237,3 +237,93 @@ def test_version_restore_validates_version_ownership(studio_client):
     )
 
     assert response.status_code == 404
+
+
+def test_prompt_version_comparison_reports_shot_and_field_diffs(studio_client):
+    client, _, _ = studio_client
+    project_id = create_prompt(client)
+    original = client.get(f"/api/prompt-projects/{project_id}").json()
+    original_prompt = original["plan"]["shots"][0]["prompt"]
+    left = client.get(f"/api/prompt-projects/{project_id}/versions").json()[0]
+
+    edited = client.patch(
+        f"/api/prompt-projects/{project_id}/shots/1",
+        json={
+            "prompt": "A revised macro shot with brushed metal and cool light",
+            "lighting": "偏冷的侧逆光",
+        },
+    )
+    assert edited.status_code == 200
+    versions = client.get(f"/api/prompt-projects/{project_id}/versions").json()
+    right = next(item for item in versions if item["version"] == 2)
+
+    response = client.get(
+        f"/api/prompt-projects/{project_id}/versions/compare",
+        params={"left_id": left["id"], "right_id": right["id"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["left"]["version"] == 1
+    assert payload["right"]["version"] == 2
+    summary = payload["summary"]
+    assert summary["modified_shots"] == 1
+    assert summary["unchanged_shots"] == 1
+    assert summary["changed_shots"] == 1
+    assert summary["field_changes"] == 2
+    assert summary["has_changes"] is True
+
+    fields = {item["field"]: item for item in payload["field_totals"]}
+    assert fields["prompt"]["count"] == 1
+    assert fields["lighting"]["count"] == 1
+    changed_shot = next(item for item in payload["shots"] if item["index"] == 1)
+    assert changed_shot["status"] == "modified"
+    assert set(changed_shot["changed_fields"]) == {"prompt", "lighting"}
+    prompt_diff = next(item for item in changed_shot["fields"] if item["field"] == "prompt")
+    assert prompt_diff["left"] == original_prompt
+    assert prompt_diff["right"] == "A revised macro shot with brushed metal and cool light"
+    unchanged_shot = next(item for item in payload["shots"] if item["index"] == 2)
+    assert unchanged_shot["status"] == "unchanged"
+
+
+def test_prompt_version_comparison_validates_selection_and_project(studio_client):
+    client, _, _ = studio_client
+    first = create_prompt(client, title="版本对比一")
+    second = create_prompt(client, title="版本对比二")
+    first_version = client.get(f"/api/prompt-projects/{first}/versions").json()[0]
+    second_version = client.get(f"/api/prompt-projects/{second}/versions").json()[0]
+
+    same = client.get(
+        f"/api/prompt-projects/{first}/versions/compare",
+        params={"left_id": first_version["id"], "right_id": first_version["id"]},
+    )
+    assert same.status_code == 400
+
+    cross_project = client.get(
+        f"/api/prompt-projects/{first}/versions/compare",
+        params={"left_id": first_version["id"], "right_id": second_version["id"]},
+    )
+    assert cross_project.status_code == 404
+
+
+def test_prompt_share_qr_svg_uses_current_origin(studio_client):
+    client, _, _ = studio_client
+    project_id = create_prompt(client)
+    share = client.post(
+        f"/api/prompt-projects/{project_id}/shares",
+        json={"permission": "read"},
+    ).json()
+
+    qr = client.get(f"/api/prompt-projects/{project_id}/shares/{share['id']}/qr.svg")
+
+    assert qr.status_code == 200
+    assert qr.headers["content-type"].startswith("image/svg+xml")
+    assert qr.headers["cache-control"] == "no-store"
+    assert qr.text.startswith("<svg")
+    assert "viewBox=" in qr.text
+    assert "http://testserver" + share["url"] in qr.text
+    assert 'fill="#111"' in qr.text
+
+    client.delete(f"/api/prompt-projects/{project_id}/shares/{share['id']}")
+    revoked = client.get(f"/api/prompt-projects/{project_id}/shares/{share['id']}/qr.svg")
+    assert revoked.status_code == 410

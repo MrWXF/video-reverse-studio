@@ -38,8 +38,10 @@ from ..services import (
     prompt_export,
     prompt_generation,
     prompt_versions,
+    qr_codes,
     sse,
     uploads,
+    version_comparison,
 )
 from ..services.reference import build_reference_context
 
@@ -174,6 +176,39 @@ def list_prompt_versions(project_id: str, db: Session = Depends(get_db)) -> list
         .order_by(PromptVersion.version.desc())
     ).all()
     return [prompt_versions.version_payload(version) for version in versions]
+
+
+@router.get(
+    "/api/prompt-projects/{project_id}/versions/compare",
+    summary="对比两个提示词版本",
+    description="按镜头序号比较两个版本快照，返回字段变化、镜头差异和方案级变化。",
+)
+def compare_prompt_versions(
+    project_id: str,
+    left_id: str,
+    right_id: str,
+    db: Session = Depends(get_db),
+) -> dict:
+    _get_project(db, project_id)
+    if left_id == right_id:
+        raise HTTPException(status_code=400, detail="请选择两个不同的版本进行对比")
+    versions = {
+        version.id: version
+        for version in db.scalars(
+            select(PromptVersion).where(
+                PromptVersion.id.in_([left_id, right_id]),
+                PromptVersion.prompt_project_id == project_id,
+            )
+        ).all()
+    }
+    left = versions.get(left_id)
+    right = versions.get(right_id)
+    if left is None or right is None:
+        raise HTTPException(status_code=404, detail="版本不存在")
+    try:
+        return version_comparison.build_version_comparison(left, right)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/api/prompt-projects/{project_id}/versions/{version_id}")
@@ -519,6 +554,43 @@ def list_prompt_shares(project_id: str, db: Session = Depends(get_db)) -> list[d
         share_payload(share, version_number=versions.get(share.version_id or ""))
         for share in shares
     ]
+
+
+@router.get(
+    "/api/prompt-projects/{project_id}/shares/{share_id}/qr.svg",
+    summary="生成分享二维码",
+    description="按当前访问域名生成只读分享链接的 SVG 二维码，不调用第三方服务。",
+)
+def prompt_share_qr(
+    project_id: str,
+    share_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Response:
+    _get_project(db, project_id)
+    share = db.get(PromptShare, share_id)
+    if share is None or share.prompt_project_id != project_id:
+        raise HTTPException(status_code=404, detail="分享链接不存在")
+    if share.revoked_at is not None:
+        raise HTTPException(status_code=410, detail="分享链接已撤销")
+    expires_at = share.expires_at
+    if expires_at is not None and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at is not None and expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=410, detail="分享链接已过期")
+    target = str(request.base_url).rstrip("/") + f"/share/{share.token}"
+    try:
+        svg = qr_codes.qr_svg(target)
+    except ValueError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": f'inline; filename="share-{share.id}.svg"',
+        },
+    )
 
 
 @router.delete("/api/prompt-projects/{project_id}/shares/{share_id}")

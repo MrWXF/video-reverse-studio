@@ -144,6 +144,7 @@ class ShotTemplateSave(BaseModel):
     description: str = Field(default="", max_length=1000)
     category: str = Field(default="自定义", max_length=50)
     tags: list[str] = Field(default_factory=list)
+    prompt_template: str | None = Field(default=None, max_length=8000)
 
 
 class ShotTemplateApply(BaseModel):

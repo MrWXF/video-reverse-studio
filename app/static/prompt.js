@@ -7,6 +7,9 @@ const promptState = {
   stream: null,
   reviewTimer: null,
   templateTimer: null,
+  templateLoadSeq: 0,
+  selectedTemplateCategory: "",
+  selectedTemplateTags: [],
   generationTimer: null,
   sseFailures: 0,
   refreshPending: false,
@@ -158,10 +161,26 @@ function promptToolsMarkup(project) {
       '<details class="studio-tool" open><summary><div><span class="panel-kicker">VERSION HISTORY</span><strong>方案版本</strong></div>' +
         '<span class="tool-count">' + (project.version_count || 0) + ' 个快照</span></summary>' +
         '<div id="prompt-versions" class="tool-body"><p class="muted">正在读取版本…</p></div></details>' +
+      '<details class="studio-tool" open><summary><div><span class="panel-kicker">VERSION DIFF</span><strong>版本 A/B 对比</strong></div>' +
+        '<span id="version-compare-status" class="tool-count">选择两个版本</span></summary><div class="tool-body version-compare-tool">' +
+        '<form class="version-compare-form" data-version-compare data-project-id="' + pEsc(project.id) + '">' +
+          '<label class="field"><span class="field-label">版本 A</span><select class="input" name="left_id" id="version-compare-left"></select></label>' +
+          '<span class="version-compare-arrow" aria-hidden="true">→</span>' +
+          '<label class="field"><span class="field-label">版本 B</span><select class="input" name="right_id" id="version-compare-right"></select></label>' +
+          '<button class="btn btn-primary" type="submit">对比版本</button></form>' +
+        '<div id="prompt-version-compare" class="version-compare-result"><p class="muted">加载版本后，选择 A/B 两个快照查看差异。</p></div>' +
+        '</div></details>' +
       '<details class="studio-tool" open><summary><div><span class="panel-kicker">SHOT TEMPLATE LIBRARY</span><strong>镜头模板库</strong></div>' +
         '<span id="template-count" class="tool-count">正在读取</span></summary><div class="tool-body template-library">' +
-        '<label class="field template-search"><span class="field-label">搜索模板</span>' +
-          '<input id="template-search" class="input" type="search" placeholder="名称、标签、景别、光线…" /></label>' +
+        '<div class="template-filter-deck">' +
+          '<label class="field"><span class="field-label">分类</span>' +
+            '<select id="template-category-filter" class="input"><option value="">全部分类</option></select></label>' +
+          '<label class="field template-search"><span class="field-label">搜索模板</span>' +
+            '<input id="template-search" class="input" type="search" placeholder="名称、标签、景别、Prompt…" /></label>' +
+          '<button class="btn btn-ghost template-filter-reset" type="button" data-reset-template-filters disabled>清除筛选</button>' +
+        '</div>' +
+        '<div class="template-tag-filter"><span>标签筛选 · 多选取交集</span>' +
+          '<div id="template-tag-filters" class="template-tag-filters"><span class="muted">正在读取标签…</span></div></div>' +
         '<div id="prompt-templates" class="template-list"><p class="muted">正在读取模板…</p></div>' +
         '</div></details>' +
       '<details class="studio-tool"><summary><div><span class="panel-kicker">ENTITY BIBLE</span><strong>角色与资产一致性</strong></div>' +
@@ -333,7 +352,7 @@ function switchMode(view, syncHash = true) {
     section.classList.toggle("hidden", section.id !== view + "-view");
   });
   if (syncHash) {
-    const hash = view === "generate" ? "#generate" : "#reverse";
+    const hash = view === "generate" ? "#generate" : view === "quality" ? "#quality" : "#reverse";
     if (window.location.hash !== hash) {
       window.history.replaceState(null, "", hash);
     }
@@ -342,6 +361,10 @@ function switchMode(view, syncHash = true) {
   if (view === "generate") {
     loadPromptProjects().catch((error) => pToast(error.message));
     loadReferenceProjects().catch((error) => pToast(error.message));
+  } else if (view === "quality") {
+    if (typeof window.loadQualityDashboard === "function") {
+      window.loadQualityDashboard(true).catch((error) => pToast(error.message));
+    }
   } else {
     stopGenerationPolling();
   }
@@ -683,12 +706,20 @@ const VERSION_SOURCE_LABELS = {
   template_apply: "套用模板",
 };
 
+const VERSION_DIFF_STATUS_LABELS = {
+  added: "新增镜头",
+  removed: "删除镜头",
+  modified: "字段修改",
+  unchanged: "无变化",
+};
+
 async function loadPromptVersions(projectId) {
   const box = p$("#prompt-versions");
   if (!box) return;
   const versions = await pApi("/api/prompt-projects/" + projectId + "/versions");
   if (!versions.length) {
     box.innerHTML = '<p class="muted">暂时没有版本快照。</p>';
+    prepareVersionCompare([]);
     return;
   }
   box.innerHTML =
@@ -704,6 +735,178 @@ async function loadPromptVersions(projectId) {
       )
       .join("") +
     '</div>';
+  prepareVersionCompare(versions);
+}
+
+function versionOptionMarkup(version) {
+  return '<option value="' + pEsc(version.id) + '">V' + pEsc(String(version.version).padStart(2, "0")) +
+    ' · ' + pEsc(VERSION_SOURCE_LABELS[version.source] || version.source) +
+    ' · ' + pEsc(version.title || "未命名方案") + '</option>';
+}
+
+function prepareVersionCompare(versions) {
+  const left = p$("#version-compare-left");
+  const right = p$("#version-compare-right");
+  const form = document.querySelector("[data-version-compare]");
+  const button = form ? form.querySelector('button[type="submit"]') : null;
+  const status = p$("#version-compare-status");
+  const box = p$("#prompt-version-compare");
+  if (!left || !right) return;
+
+  const previousLeft = left.value;
+  const previousRight = right.value;
+  const options = versions.map(versionOptionMarkup).join("");
+  left.innerHTML = options;
+  right.innerHTML = options;
+  const available = versions.length >= 2;
+  left.disabled = !available;
+  right.disabled = !available;
+  if (button) button.disabled = !available;
+
+  const fallbackRight = versions[0] ? versions[0].id : "";
+  const fallbackLeft = versions[1] ? versions[1].id : fallbackRight;
+  left.value = versions.some((item) => item.id === previousLeft) ? previousLeft : fallbackLeft;
+  right.value = versions.some((item) => item.id === previousRight) ? previousRight : fallbackRight;
+  if (available && left.value === right.value) left.value = fallbackLeft;
+
+  if (status) {
+    status.textContent = available ? versions.length + " 个快照可对比" : "至少需要 2 个版本";
+  }
+  if (!available && box) {
+    box.innerHTML = '<p class="muted">先编辑或重生成一次，产生两个版本快照后才能对比。</p>';
+  }
+}
+
+function versionValueText(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  if (Array.isArray(value)) return value.length ? value.join(" · ") : "空";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function versionVersionLabel(version) {
+  return "V" + String((version || {}).version || 0).padStart(2, "0");
+}
+
+function versionDiffShotSideMarkup(shot, version, tone) {
+  const data = shot || {};
+  const exists = Object.keys(data).length > 0;
+  return (
+    '<article class="version-diff-side ' + tone + (exists ? "" : " is-empty") + '">' +
+      '<span>' + pEsc(versionVersionLabel(version)) + '</span>' +
+      '<strong>' + pEsc(exists ? (data.subject || data.shot_type || "未命名镜头") : "镜头不存在") + '</strong>' +
+      '<p>' + pEsc(exists ? (data.prompt || "未提供 Prompt") : "—") + '</p>' +
+      '<small>' + (exists
+        ? pEsc(data.shot_type || "—") + ' · ' + pEsc(data.camera_movement || "—") + ' · ' +
+          pEsc(Number(data.duration || 0).toFixed(1)) + 's'
+        : "—") + '</small>' +
+    '</article>'
+  );
+}
+
+function versionChangeListMarkup(title, changes) {
+  if (!changes || !changes.length) return "";
+  return (
+    '<details class="version-context-changes"><summary><span>' + pEsc(title) + '</span><b>' + changes.length + '</b></summary>' +
+      '<div class="version-context-list">' + changes.map((item) =>
+        '<div class="version-context-row"><span>' + pEsc(item.label || item.field) + '</span>' +
+          '<div><small>' + pEsc(versionValueText(item.left)) + '</small><i>→</i>' +
+          '<strong>' + pEsc(versionValueText(item.right)) + '</strong></div></div>'
+      ).join("") + '</div></details>'
+  );
+}
+
+function versionComparisonMarkup(data) {
+  const summary = data.summary || {};
+  const left = data.left || {};
+  const right = data.right || {};
+  const fieldTotals = data.field_totals || [];
+  const changedShots = (data.shots || []).filter((shot) => shot.status !== "unchanged");
+  const durationDelta = Number(summary.duration_delta || 0);
+  const durationText = (durationDelta > 0 ? "+" : "") + durationDelta.toFixed(1) + "s";
+  const metrics = [
+    ["CHANGED SHOTS", (summary.changed_shots || 0) + " / " + Math.max(summary.left_shots || 0, summary.right_shots || 0)],
+    ["FIELD CHANGES", summary.field_changes || 0],
+    ["ADDED / REMOVED", "+" + (summary.added_shots || 0) + " / −" + (summary.removed_shots || 0)],
+    ["DURATION", durationText],
+  ];
+
+  return (
+    '<div class="version-compare-head">' +
+      '<div><span>' + pEsc(versionVersionLabel(left)) + '</span><strong>' + pEsc(VERSION_SOURCE_LABELS[left.source] || left.source || "版本 A") + '</strong>' +
+        '<small>' + pEsc(left.title || "未命名方案") + ' · ' + (left.shot_count || 0) + ' 镜</small></div>' +
+      '<i aria-hidden="true">→</i>' +
+      '<div><span>' + pEsc(versionVersionLabel(right)) + '</span><strong>' + pEsc(VERSION_SOURCE_LABELS[right.source] || right.source || "版本 B") + '</strong>' +
+        '<small>' + pEsc(right.title || "未命名方案") + ' · ' + (right.shot_count || 0) + ' 镜</small></div>' +
+    '</div>' +
+    '<div class="version-compare-kpis">' + metrics.map(([label, value]) =>
+      '<div><span>' + label + '</span><strong>' + pEsc(value) + '</strong></div>'
+    ).join("") + '</div>' +
+    (fieldTotals.length
+      ? '<div class="version-field-chips">' + fieldTotals.map((item) =>
+          '<span><b>' + pEsc(item.label) + '</b> ×' + pEsc(item.count) + '</span>'
+        ).join("") + '</div>'
+      : '<p class="version-identical">两个版本的镜头字段一致。</p>') +
+    versionChangeListMarkup("方案设置变化", data.plan_changes) +
+    versionChangeListMarkup("Brief 变化", data.brief_changes) +
+    versionChangeListMarkup("Entity Bible 变化", data.entity_changes) +
+    (changedShots.length
+      ? '<div class="version-shot-diffs">' + changedShots.map((shot) =>
+          '<details class="version-shot-diff is-' + pEsc(shot.status) + '"><summary>' +
+            '<span>SHOT ' + pEsc(String(shot.index).padStart(2, "0")) + '</span>' +
+            '<div><strong>' + pEsc(VERSION_DIFF_STATUS_LABELS[shot.status] || shot.status) + '</strong>' +
+              '<small>' + (shot.status === "modified" ? (shot.changed_fields || []).length + ' 个字段变化' : '版本间镜头增删') + '</small></div>' +
+            '<b>' + pEsc(shot.status === "added" ? "+" : shot.status === "removed" ? "−" : "±") + '</b></summary>' +
+            '<div class="version-shot-body">' +
+              '<div class="version-shot-sides">' +
+                versionDiffShotSideMarkup(shot.left, left, "is-left") +
+                versionDiffShotSideMarkup(shot.right, right, "is-right") +
+              '</div>' +
+              ((shot.fields || []).length
+                ? '<div class="version-field-diffs">' + shot.fields.map((field) =>
+                    '<div class="version-field-diff"><span>' + pEsc(field.label || field.field) + '</span>' +
+                      '<div><del>' + pEsc(versionValueText(field.left)) + '</del><ins>' + pEsc(versionValueText(field.right)) + '</ins></div></div>'
+                  ).join("") + '</div>'
+                : '<p class="version-shot-note">该镜头只存在于一侧版本。</p>') +
+            '</div></details>'
+        ).join("") + '</div>'
+      : '<div class="version-compare-empty">没有镜头级差异，方案级变化如上。</div>') +
+    '<p class="version-compare-note">' + pEsc(data.note || "对比不会修改当前方案。") + '</p>'
+  );
+}
+
+async function comparePromptVersions(projectId, leftId, rightId) {
+  const box = p$("#prompt-version-compare");
+  const status = p$("#version-compare-status");
+  if (!box) return;
+  if (!leftId || !rightId) {
+    pToast("请选择两个版本");
+    return;
+  }
+  if (leftId === rightId) {
+    pToast("请选择两个不同的版本");
+    return;
+  }
+  box.classList.add("is-loading");
+  box.innerHTML = '<p class="muted">正在计算版本差异…</p>';
+  if (status) status.textContent = "计算中…";
+  try {
+    const data = await pApi(
+      "/api/prompt-projects/" + projectId + "/versions/compare?left_id=" +
+      encodeURIComponent(leftId) + "&right_id=" + encodeURIComponent(rightId)
+    );
+    box.innerHTML = versionComparisonMarkup(data);
+    if (status) {
+      status.textContent = data.summary.has_changes
+        ? (data.summary.changed_shots || 0) + " 镜 / " + (data.summary.field_changes || 0) + " 字段变化"
+        : "无差异";
+    }
+  } catch (error) {
+    box.innerHTML = '<p class="error-text">' + pEsc(error.message) + '</p>';
+    if (status) status.textContent = "对比失败";
+  } finally {
+    box.classList.remove("is-loading");
+  }
 }
 
 function comparisonMarkup(data) {
@@ -840,8 +1043,11 @@ function shareMarkup(share) {
       '<small>' + (expired ? "已失效" : "有效") + (share.expires_at ? " · 至 " + pEsc(new Date(share.expires_at).toLocaleString("zh-CN")) : " · 长期有效") + '</small></div>' +
       '<div class="share-item-actions"><a class="btn btn-ghost" href="' + pEsc(share.url) + '" target="_blank" rel="noreferrer">打开</a>' +
         '<button class="btn btn-ghost" type="button" data-copy-share="' + pEsc(shareAbsoluteUrl(share.url)) + '">复制链接</button>' +
+        (!expired ? '<button class="btn btn-ghost" type="button" data-toggle-share-qr="' + pEsc(share.id) + '" data-share-url="' + pEsc(shareAbsoluteUrl(share.url)) + '" aria-expanded="false">二维码</button>' : "") +
         (!expired ? '<button class="btn btn-ghost danger-action" type="button" data-revoke-share="' + pEsc(share.id) + '">撤销</button>' : "") +
-      '</div></div>'
+      '</div>' +
+      (!expired ? '<div class="share-qr-panel hidden" data-share-qr-panel="' + pEsc(share.id) + '"></div>' : "") +
+    '</div>'
   );
 }
 
@@ -903,6 +1109,71 @@ async function revokeShare(projectId, shareId) {
   }
 }
 
+function toggleShareQr(projectId, shareId, button) {
+  const panel = Array.from(document.querySelectorAll("[data-share-qr-panel]"))
+    .find((item) => item.dataset.shareQrPanel === shareId);
+  if (!panel) return;
+  const opening = panel.classList.contains("hidden");
+  panel.classList.toggle("hidden", !opening);
+  button.setAttribute("aria-expanded", String(opening));
+  button.textContent = opening ? "收起二维码" : "二维码";
+  if (!opening || panel.dataset.loaded === "true") return;
+
+  const qrSrc = "/api/prompt-projects/" + encodeURIComponent(projectId) + "/shares/" +
+    encodeURIComponent(shareId) + "/qr.svg";
+  panel.innerHTML =
+    '<div class="share-qr-card"><div class="share-qr-image"><img src="' + pEsc(qrSrc) + '" alt="分享链接二维码" width="180" height="180" loading="eager" /></div>' +
+      '<div class="share-qr-copy"><span>SCAN TO OPEN</span><strong>扫码打开分享页</strong>' +
+        '<small>' + pEsc(button.dataset.shareUrl || "") + '</small>' +
+        '<button class="btn btn-ghost" type="button" data-copy-share="' + pEsc(button.dataset.shareUrl || "") + '">复制链接</button></div></div>';
+  panel.dataset.loaded = "true";
+}
+
+function renderTemplateFacets(facets) {
+  const categories = Array.isArray(facets?.categories) ? facets.categories : [];
+  const categorySelect = p$("#template-category-filter");
+  if (categorySelect) {
+    const availableCategories = new Set(categories.map((item) => item.value));
+    if (
+      promptState.selectedTemplateCategory &&
+      !availableCategories.has(promptState.selectedTemplateCategory)
+    ) {
+      promptState.selectedTemplateCategory = "";
+    }
+    categorySelect.innerHTML =
+      '<option value="">全部分类</option>' +
+      categories
+        .map(
+          (item) =>
+            '<option value="' + pEsc(item.value) + '">' + pEsc(item.value) +
+            ' · ' + Number(item.count || 0) + '</option>'
+        )
+        .join("");
+    categorySelect.value = promptState.selectedTemplateCategory;
+  }
+
+  const tagsBox = p$("#template-tag-filters");
+  if (!tagsBox) return;
+  const tags = Array.isArray(facets?.tags) ? facets.tags : [];
+  const availableTags = new Set(tags.map((item) => item.value));
+  promptState.selectedTemplateTags = promptState.selectedTemplateTags.filter((tag) =>
+    availableTags.has(tag)
+  );
+  tagsBox.innerHTML = tags.length
+    ? tags
+        .map((item) => {
+          const selected = promptState.selectedTemplateTags.includes(item.value);
+          return (
+            '<button class="template-tag-chip' + (selected ? " is-selected" : "") +
+              '" type="button" data-template-tag-filter="' + pEsc(item.value) +
+              '" aria-pressed="' + selected + '"><span>#' + pEsc(item.value) +
+              '</span><b>' + Number(item.count || 0) + '</b></button>'
+          );
+        })
+        .join("")
+    : '<span class="muted">暂无标签</span>';
+}
+
 function templateItemMarkup(template) {
   const tags = (template.tags || [])
     .filter(Boolean)
@@ -912,6 +1183,12 @@ function templateItemMarkup(template) {
     .filter(Boolean)
     .map((item) => '<span>' + pEsc(item) + '</span>')
     .join("");
+  const placeholders = template.placeholders || [];
+  const placeholderBadge = template.has_placeholders
+    ? '<span class="template-placeholder-badge" title="' +
+      pEsc(placeholders.map((item) => "{{" + item + "}}").join(", ")) + '">' +
+      placeholders.length + ' 个占位符</span>'
+    : "";
   return (
     '<article class="template-item" data-template-id="' + pEsc(template.id) + '">' +
       '<div class="template-item-head"><div><span>' + pEsc(template.category || "自定义") + '</span>' +
@@ -919,7 +1196,7 @@ function templateItemMarkup(template) {
         '<button class="btn btn-ghost danger-action" type="button" data-delete-template="' + pEsc(template.id) + '">删除</button></div>' +
       (template.description ? '<p>' + pEsc(template.description) + '</p>' : '') +
       (tags ? '<div class="tag-row">' + tags + '</div>' : '') +
-      '<div class="template-meta">' + (meta || '<span>通用镜头模板</span>') + '</div>' +
+      '<div class="template-meta">' + (meta || '<span>通用镜头模板</span>') + placeholderBadge + '</div>' +
       (template.color_palette?.length ? '<div class="palette-row">' + referencePaletteMarkup(template.color_palette) + '</div>' : '') +
       '<div class="template-actions">' +
         '<button class="btn btn-ghost" type="button" data-apply-template="' + pEsc(template.id) + '" data-apply-mode="style">套用风格</button>' +
@@ -933,9 +1210,33 @@ async function loadPromptTemplates() {
   const box = p$("#prompt-templates");
   if (!box) return;
   const search = (p$("#template-search")?.value || "").trim();
-  const templates = await pApi("/api/shot-templates?search=" + encodeURIComponent(search));
   const count = p$("#template-count");
-  if (count) count.textContent = templates.length + " 个模板";
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  if (promptState.selectedTemplateCategory) {
+    params.set("category", promptState.selectedTemplateCategory);
+  }
+  promptState.selectedTemplateTags.forEach((tag) => params.append("tags", tag));
+  const requestSeq = ++promptState.templateLoadSeq;
+  if (count) count.textContent = "筛选中…";
+  const query = params.toString();
+  const [templates, facets] = await Promise.all([
+    pApi("/api/shot-templates" + (query ? "?" + query : "")),
+    pApi("/api/shot-templates/facets"),
+  ]);
+  if (requestSeq !== promptState.templateLoadSeq) return;
+  renderTemplateFacets(facets);
+  const filtering = Boolean(
+    search || promptState.selectedTemplateCategory || promptState.selectedTemplateTags.length
+  );
+  if (count) {
+    const total = facets?.total ?? templates.length;
+    count.textContent = filtering
+      ? templates.length + " / " + total + " 个模板"
+      : total + " 个模板";
+  }
+  const reset = p$("[data-reset-template-filters]");
+  if (reset) reset.disabled = !filtering;
   box.innerHTML = templates.length
     ? templates.map(templateItemMarkup).join("")
     : '<p class="muted">还没有匹配的模板。先在逆向镜头里点击“存为模板”。</p>';
@@ -1353,6 +1654,23 @@ document.addEventListener("DOMContentLoaded", () => {
       deleteTemplate(deleteTemplateButton.dataset.deleteTemplate);
       return;
     }
+    const tagFilter = event.target.closest("[data-template-tag-filter]");
+    if (tagFilter) {
+      const value = tagFilter.dataset.templateTagFilter || "";
+      promptState.selectedTemplateTags = promptState.selectedTemplateTags.includes(value)
+        ? promptState.selectedTemplateTags.filter((tag) => tag !== value)
+        : [...promptState.selectedTemplateTags, value];
+      loadPromptTemplates().catch((error) => pToast(error.message));
+      return;
+    }
+    if (event.target.closest("[data-reset-template-filters]")) {
+      promptState.selectedTemplateCategory = "";
+      promptState.selectedTemplateTags = [];
+      const search = p$("#template-search");
+      if (search) search.value = "";
+      loadPromptTemplates().catch((error) => pToast(error.message));
+      return;
+    }
     const cancelPrompt = event.target.closest("[data-cancel-prompt]");
     if (cancelPrompt) {
       cancelPromptProject(cancelPrompt.dataset.cancelPrompt);
@@ -1404,6 +1722,15 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       return;
     }
+    const toggleShareQrButton = event.target.closest("[data-toggle-share-qr]");
+    if (toggleShareQrButton && promptState.currentId) {
+      toggleShareQr(
+        promptState.currentId,
+        toggleShareQrButton.dataset.toggleShareQr,
+        toggleShareQrButton
+      );
+      return;
+    }
     const revokeShareButton = event.target.closest("[data-revoke-share]");
     if (revokeShareButton && promptState.currentId) {
       if (confirm("确定撤销这个分享链接？撤销后访客将无法继续访问。")) {
@@ -1426,6 +1753,11 @@ document.addEventListener("DOMContentLoaded", () => {
       loadPromptTemplates().catch((error) => pToast(error.message));
     }, 220);
   });
+  p$("#prompt-detail").addEventListener("change", (event) => {
+    if (!event.target.closest("#template-category-filter")) return;
+    promptState.selectedTemplateCategory = event.target.value;
+    loadPromptTemplates().catch((error) => pToast(error.message));
+  });
   p$("#prompt-detail").addEventListener("submit", (event) => {
     const shotEditor = event.target.closest("[data-prompt-shot-editor]");
     if (shotEditor) {
@@ -1445,6 +1777,17 @@ document.addEventListener("DOMContentLoaded", () => {
       submitReview(reviewForm);
       return;
     }
+    const compareForm = event.target.closest("[data-version-compare]");
+    if (compareForm) {
+      event.preventDefault();
+      const data = new FormData(compareForm);
+      comparePromptVersions(
+        compareForm.dataset.projectId,
+        data.get("left_id"),
+        data.get("right_id")
+      );
+      return;
+    }
     const shareForm = event.target.closest("[data-share-form]");
     if (shareForm) {
       event.preventDefault();
@@ -1455,11 +1798,15 @@ document.addEventListener("DOMContentLoaded", () => {
   const initialHash = window.location.hash;
   if (initialHash === "#generate" || initialHash === "#generate-view") {
     switchMode("generate", false);
+  } else if (initialHash === "#quality" || initialHash === "#quality-view") {
+    switchMode("quality", false);
   }
   loadReferenceProjects().catch((error) => pToast(error.message));
   window.addEventListener("hashchange", () => {
     if (window.location.hash === "#generate" || window.location.hash === "#generate-view") {
       switchMode("generate", false);
+    } else if (window.location.hash === "#quality" || window.location.hash === "#quality-view") {
+      switchMode("quality", false);
     } else if (window.location.hash === "#reverse" || window.location.hash === "#reverse-view") {
       switchMode("reverse", false);
     }
