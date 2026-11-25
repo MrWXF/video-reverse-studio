@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..config import Settings, get_settings
 from ..db import get_db
-from ..models import Job, Project, PromptProject, Shot
+from ..models import Job, Project, PromptProject, Shot, ShotEditEvent
 from ..observability import current_request_id
 from ..schemas import ShotAnalysis, ShotAnalysisUpdate
 from ..serializers import job_payload, project_payload, shot_payload
@@ -263,12 +263,34 @@ def update_shot_analysis(
 
     changes = update.model_dump(exclude_unset=True)
     transcript = changes.pop("transcript", None)
-    analysis = ShotAnalysis.model_validate({**(shot.analysis or {}), **changes})
-    shot.analysis = analysis.model_dump(mode="json")
+    before = ShotAnalysis.model_validate(shot.analysis or {}).model_dump(mode="json")
+    analysis = ShotAnalysis.model_validate({**before, **changes})
+    after = analysis.model_dump(mode="json")
+    changed_fields = {
+        field: {"before": before.get(field), "after": after.get(field)}
+        for field in changes
+        if before.get(field) != after.get(field)
+    }
+    if transcript is not None and shot.transcript != transcript:
+        changed_fields["transcript"] = {
+            "before": shot.transcript,
+            "after": transcript,
+        }
+    shot.analysis = after
     shot.origin = analysis.origin
     shot.confidence = analysis.confidence
     if transcript is not None:
         shot.transcript = transcript
+    if changed_fields:
+        db.add(
+            ShotEditEvent(
+                project_id=project.id,
+                shot_id=shot.id,
+                shot_index=shot.index,
+                source="manual_edit",
+                changes=changed_fields,
+            )
+        )
     project.status = "done"
     db.commit()
     rebuild_project_recipe(project, get_settings())

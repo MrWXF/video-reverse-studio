@@ -35,6 +35,10 @@ class Project(Base):
         back_populates="project",
         cascade="all, delete-orphan",
     )
+    edit_events: Mapped[list["ShotEditEvent"]] = relationship(
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
 
 
 class Shot(Base):
@@ -192,3 +196,52 @@ class PromptComment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     share: Mapped["PromptShare"] = relationship(back_populates="comments")
+
+
+class ShotTemplate(Base):
+    """A reusable shot style saved from a completed reverse-analysis shot."""
+
+    __tablename__ = "shot_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    category: Mapped[str] = mapped_column(String(50), default="自定义", index=True)
+    tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+
+    shot_type: Mapped[str] = mapped_column(String(80), default="")
+    camera_movement: Mapped[str] = mapped_column(String(100), default="")
+    lighting: Mapped[str] = mapped_column(String(200), default="")
+    visual_style: Mapped[str] = mapped_column(String(300), default="")
+    color_palette: Mapped[list[str]] = mapped_column(JSON, default=list)
+    prompt_template: Mapped[str] = mapped_column(Text, default="")
+    negative_prompt: Mapped[str] = mapped_column(Text, default="")
+    transition: Mapped[str] = mapped_column(String(100), default="")
+    remake_notes: Mapped[str] = mapped_column(Text, default="")
+
+    source_project_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
+    source_shot_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class ShotEditEvent(Base):
+    """Immutable audit record used by the future analysis-quality dashboard."""
+
+    __tablename__ = "shot_edit_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    shot_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    shot_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source: Mapped[str] = mapped_column(String(40), default="manual_edit")
+    changes: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    project: Mapped["Project"] = relationship(back_populates="edit_events")

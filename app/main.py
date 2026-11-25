@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
+from .api.insight_routes import router as insight_router
 from .api.prompt_routes import router as prompt_router
 from .api.routes import router
 from .api.share_routes import router as share_router
@@ -74,6 +75,7 @@ app.add_middleware(BasicAuthMiddleware)
 app.add_middleware(RequestContextMiddleware)
 app.include_router(router, tags=["video-analysis"])
 app.include_router(prompt_router, tags=["prompt-studio"])
+app.include_router(insight_router, tags=["phase1-insights"])
 app.include_router(share_router)
 app.mount(
     "/static",

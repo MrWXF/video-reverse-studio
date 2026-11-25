@@ -1,6 +1,7 @@
 const state = {
   file: null,
   currentId: null,
+  currentProject: null,
   timer: null,
   stream: null,
   sseFailures: 0,
@@ -44,6 +45,7 @@ const {
   copyText: copyValue,
   formatNumber,
   formatClock,
+  usageMarkup,
 } = window.ReelReverse;
 
 function setFile(file) {
@@ -333,6 +335,8 @@ function shotCard(shot, position, project) {
         '</div>' +
         '<div class="shot-actions">' +
           '<button class="btn btn-ghost" type="button" data-edit-shot>编辑分析</button>' +
+          '<button class="btn btn-ghost" type="button" data-save-template data-project-id="' + esc(project.id) +
+            '" data-shot-id="' + esc(shot.id) + '">存为模板</button>' +
           '<button class="btn btn-ghost" type="button" data-reference-project="' + esc(project.id) +
             '" data-reference-mode="full" data-reference-shot="' + esc(shot.index) + '">用此镜头生成 ↗</button>' +
         '</div>' +
@@ -384,7 +388,11 @@ async function renderDetail(project) {
   const statusLabel = STATUS_LABELS[project.status] || project.status;
   const shots = project.shots || [];
   const progress = Math.round((job.progress || 0) * 100);
-  const recipeText = await ensureRecipe(project);
+  state.currentProject = project;
+  const [recipeText, projectUsage] = await Promise.all([
+    ensureRecipe(project),
+    loadProjectCost(project.id).catch(() => null),
+  ]);
   const cards = shots.map((shot, index) => shotCard(shot, index, project)).join("");
 
   const progressCard = running
@@ -405,7 +413,7 @@ async function renderDetail(project) {
     : "";
 
   const referenceActions = project.status === "done"
-    ? '<button class="btn btn-primary" type="button" data-reference-project="' + esc(project.id) + '" data-reference-mode="style">沿用此风格生成</button>' +
+    ? '<button class="btn btn-primary" type="button" data-reference-project="' + esc(project.id) + '" data-reference-mode="style">一键生成复刻方案</button>' +
       '<button class="btn btn-ghost" type="button" data-reference-project="' + esc(project.id) + '" data-reference-mode="structure">参考镜头结构</button>'
     : "";
 
@@ -454,6 +462,7 @@ async function renderDetail(project) {
     '</div>' +
     relatedPromptsMarkup(project) +
     (shots.length ? summaryMarkup(project, shots) : "") +
+    (projectUsage ? usageMarkup(projectUsage, true) : "") +
     progressCard +
     errorCard +
     mediaBlock +
@@ -521,6 +530,106 @@ async function deleteProject(id) {
   }
 }
 
+async function loadProjectCost(projectId) {
+  return api("/api/projects/" + encodeURIComponent(projectId) + "/cost");
+}
+
+function templatePreviewMarkup(shot) {
+  const analysis = shot.analysis || {};
+  const tags = [analysis.shot_type, analysis.camera_movement, analysis.lighting]
+    .filter(Boolean)
+    .map((item) => '<span>' + esc(item) + '</span>')
+    .join("");
+  return (
+    '<div class="template-preview-head"><span>FROM SHOT ' + esc(String(shot.index).padStart(2, "0")) + '</span>' +
+      '<strong>' + esc(analysis.subject || "镜头分析") + '</strong></div>' +
+    '<p>' + esc(analysis.scene || analysis.visual_style || "保存景别、运镜、光线、色板和 Prompt。") + '</p>' +
+    '<div class="tag-row">' + tags + '</div>' +
+    '<div class="palette-row">' + paletteMarkup(analysis.color_palette) + '</div>'
+  );
+}
+
+function openTemplateDialog(projectId, shotId) {
+  const project = state.currentProject;
+  const shot = (project?.shots || []).find((item) => String(item.id) === String(shotId));
+  const dialog = $("#template-dialog");
+  const form = $("#template-form");
+  if (!project || !shot || !dialog || !form) {
+    toast("镜头数据尚未加载");
+    return;
+  }
+  form.dataset.projectId = projectId;
+  form.dataset.shotId = shotId;
+  $("#template-name").value = project.title + " · 镜头 " + String(shot.index).padStart(2, "0");
+  $("#template-description").value = "";
+  $("#template-category").value = "自定义";
+  $("#template-tags").value = "";
+  $("#template-preview").innerHTML = templatePreviewMarkup(shot);
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+  $("#template-name").focus();
+  $("#template-name").select();
+}
+
+function closeTemplateDialog() {
+  const dialog = $("#template-dialog");
+  if (!dialog) return;
+  if (typeof dialog.close === "function") dialog.close();
+  else dialog.removeAttribute("open");
+}
+
+function bindTemplateDialog() {
+  const dialog = $("#template-dialog");
+  const form = $("#template-form");
+  if (!dialog || !form) return;
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) closeTemplateDialog();
+  });
+  dialog.querySelectorAll("[data-close-template]").forEach((button) => {
+    button.addEventListener("click", closeTemplateDialog);
+  });
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = $("#template-name").value.trim();
+    if (!name) {
+      toast("请填写模板名称");
+      $("#template-name").focus();
+      return;
+    }
+    const button = form.querySelector('button[type="submit"]');
+    const label = button.textContent;
+    button.disabled = true;
+    button.textContent = "保存中…";
+    try {
+      await api(
+        "/api/projects/" + encodeURIComponent(form.dataset.projectId) + "/shots/" +
+          encodeURIComponent(form.dataset.shotId) + "/save-template",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name,
+            description: $("#template-description").value.trim(),
+            category: $("#template-category").value.trim() || "自定义",
+            tags: $("#template-tags").value.split(/[,，]/).map((item) => item.trim()).filter(Boolean),
+          }),
+        }
+      );
+      closeTemplateDialog();
+      toast("镜头模板已保存");
+      if (typeof window.refreshShotTemplates === "function") window.refreshShotTemplates();
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      button.disabled = false;
+      button.textContent = label;
+    }
+  });
+}
+
 function applyStyle(style, persist = true) {
   const next = style === "b" ? "b" : "a";
   document.documentElement.dataset.style = next;
@@ -572,6 +681,11 @@ function bindDetail() {
     const cancelShotEdit = event.target.closest("[data-cancel-shot-edit]");
     if (cancelShotEdit) {
       cancelShotEdit.closest("[data-shot-editor]")?.classList.add("hidden");
+      return;
+    }
+    const saveTemplate = event.target.closest("[data-save-template]");
+    if (saveTemplate) {
+      openTemplateDialog(saveTemplate.dataset.projectId, saveTemplate.dataset.shotId);
       return;
     }
     const reference = event.target.closest("[data-reference-project]");
@@ -676,6 +790,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bindStyleSwitch();
   bindDropzone();
   bindDetail();
+  bindTemplateDialog();
   $("#upload").addEventListener("click", upload);
   $("#refresh").addEventListener("click", () => {
     loadProjects().catch((error) => toast(error.message));

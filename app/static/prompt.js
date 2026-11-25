@@ -6,6 +6,7 @@ const promptState = {
   currentProject: null,
   stream: null,
   reviewTimer: null,
+  templateTimer: null,
   sseFailures: 0,
   refreshPending: false,
 };
@@ -34,6 +35,7 @@ const {
   api: pApi,
   copyText,
   formatClock: pClock,
+  usageMarkup,
 } = window.ReelReverse;
 
 function referencePaletteMarkup(colors) {
@@ -146,6 +148,12 @@ function promptToolsMarkup(project) {
       '<details class="studio-tool" open><summary><div><span class="panel-kicker">VERSION HISTORY</span><strong>方案版本</strong></div>' +
         '<span class="tool-count">' + (project.version_count || 0) + ' 个快照</span></summary>' +
         '<div id="prompt-versions" class="tool-body"><p class="muted">正在读取版本…</p></div></details>' +
+      '<details class="studio-tool" open><summary><div><span class="panel-kicker">SHOT TEMPLATE LIBRARY</span><strong>镜头模板库</strong></div>' +
+        '<span id="template-count" class="tool-count">正在读取</span></summary><div class="tool-body template-library">' +
+        '<label class="field template-search"><span class="field-label">搜索模板</span>' +
+          '<input id="template-search" class="input" type="search" placeholder="名称、标签、景别、光线…" /></label>' +
+        '<div id="prompt-templates" class="template-list"><p class="muted">正在读取模板…</p></div>' +
+        '</div></details>' +
       '<details class="studio-tool"><summary><div><span class="panel-kicker">ENTITY BIBLE</span><strong>角色与资产一致性</strong></div>' +
         '<span class="tool-count">' + ((project.entity_bible || {}).consistency_rules || []).length + ' 条规则</span></summary>' +
         '<div class="tool-body">' + entityEditorMarkup(project) + '</div></details>' +
@@ -169,6 +177,9 @@ function promptToolsMarkup(project) {
           '<label class="field"><span class="field-label">有效天数</span><input class="input" type="number" name="expires_in_days" min="1" max="365" placeholder="永久" /></label>' +
           '<button class="btn btn-primary" type="submit">创建分享链接</button></form>' +
         '<div id="prompt-shares" class="share-list"><p class="muted">正在读取分享链接…</p></div></div></details>' +
+      '<details class="studio-tool"><summary><div><span class="panel-kicker">COST / USAGE</span><strong>本次生成用量</strong></div>' +
+        '<span class="tool-count">TOKENS · EST.</span></summary><div class="tool-body"><div id="prompt-cost">' +
+        '<p class="muted">正在计算用量…</p></div></div></details>' +
     '</div>'
   );
 }
@@ -270,8 +281,16 @@ window.openPromptFromReference = async (projectId, mode = "style", shotIndex = n
     if (data) {
       applyReferenceSuggestions(data);
       const idea = p$("#prompt-idea");
-      if (shotIndex && idea && !idea.value.trim()) {
-        idea.value = "参考镜头 " + String(shotIndex).padStart(2, "0") + " 的构图、光线和镜头语言，创作一个新的画面。";
+      if (idea && !idea.value.trim()) {
+        const reference = data.reference?.recipe || {};
+        if (shotIndex) {
+          idea.value = "参考镜头 " + String(shotIndex).padStart(2, "0") + " 的构图、光线和镜头语言，创作一个新的画面。";
+        } else {
+          const modeLabel = mode === "structure" ? "镜头结构" : mode === "full" ? "逐镜构图与镜头语言" : "视觉风格、光线和节奏";
+          const summary = reference.summary ? reference.summary + "；" : "";
+          idea.value = "参考《" + (reference.title || "该项目") + "》的" + modeLabel + "，" + summary +
+            "创作一支新的短视频，保留镜头节奏、光线和色彩语言，并替换为我的产品与场景。";
+        }
       }
       if (idea) idea.focus();
     }
@@ -633,6 +652,7 @@ const VERSION_SOURCE_LABELS = {
   shot_regenerate: "单镜重生成",
   entity_edit: "Entity Bible",
   restore: "版本恢复",
+  template_apply: "套用模板",
 };
 
 async function loadPromptVersions(projectId) {
@@ -855,12 +875,94 @@ async function revokeShare(projectId, shareId) {
   }
 }
 
+function templateItemMarkup(template) {
+  const tags = (template.tags || [])
+    .filter(Boolean)
+    .map((tag) => '<span>' + pEsc(tag) + '</span>')
+    .join("");
+  const meta = [template.shot_type, template.camera_movement, template.lighting]
+    .filter(Boolean)
+    .map((item) => '<span>' + pEsc(item) + '</span>')
+    .join("");
+  return (
+    '<article class="template-item" data-template-id="' + pEsc(template.id) + '">' +
+      '<div class="template-item-head"><div><span>' + pEsc(template.category || "自定义") + '</span>' +
+        '<strong>' + pEsc(template.name) + '</strong></div>' +
+        '<button class="btn btn-ghost danger-action" type="button" data-delete-template="' + pEsc(template.id) + '">删除</button></div>' +
+      (template.description ? '<p>' + pEsc(template.description) + '</p>' : '') +
+      (tags ? '<div class="tag-row">' + tags + '</div>' : '') +
+      '<div class="template-meta">' + (meta || '<span>通用镜头模板</span>') + '</div>' +
+      (template.color_palette?.length ? '<div class="palette-row">' + referencePaletteMarkup(template.color_palette) + '</div>' : '') +
+      '<div class="template-actions">' +
+        '<button class="btn btn-ghost" type="button" data-apply-template="' + pEsc(template.id) + '" data-apply-mode="style">套用风格</button>' +
+        '<button class="btn btn-ghost" type="button" data-apply-template="' + pEsc(template.id) + '" data-apply-mode="full">套用 + Prompt</button>' +
+      '</div>' +
+    '</article>'
+  );
+}
+
+async function loadPromptTemplates() {
+  const box = p$("#prompt-templates");
+  if (!box) return;
+  const search = (p$("#template-search")?.value || "").trim();
+  const templates = await pApi("/api/shot-templates?search=" + encodeURIComponent(search));
+  const count = p$("#template-count");
+  if (count) count.textContent = templates.length + " 个模板";
+  box.innerHTML = templates.length
+    ? templates.map(templateItemMarkup).join("")
+    : '<p class="muted">还没有匹配的模板。先在逆向镜头里点击“存为模板”。</p>';
+}
+
+async function loadPromptCost(projectId) {
+  const box = p$("#prompt-cost");
+  if (!box) return;
+  const usage = await pApi("/api/prompt-projects/" + projectId + "/cost");
+  box.innerHTML = usageMarkup(usage, true);
+}
+
+async function applyTemplate(projectId, templateId, mode) {
+  const fields = mode === "full"
+    ? ["shot_type", "camera_movement", "lighting", "color_palette", "transition", "prompt", "negative_prompt", "remake_notes"]
+    : ["shot_type", "camera_movement", "lighting", "color_palette", "transition"];
+  try {
+    const project = await pApi("/api/prompt-projects/" + projectId + "/apply-template", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ template_id: Number(templateId), fields }),
+    });
+    renderPromptDetail(project);
+    await loadPromptAuxiliary(project);
+    pToast(mode === "full" ? "模板已套用，含 Prompt 与备注" : "模板风格已套用");
+  } catch (error) {
+    pToast(error.message);
+  }
+}
+
+async function deleteTemplate(templateId) {
+  if (!confirm("确定删除这个模板？已套用的镜头不会回滚。")) return;
+  try {
+    await pApi("/api/shot-templates/" + templateId, { method: "DELETE" });
+    pToast("模板已删除");
+    await loadPromptTemplates();
+  } catch (error) {
+    pToast(error.message);
+  }
+}
+
+window.refreshShotTemplates = () => {
+  if (p$("#prompt-templates")) {
+    loadPromptTemplates().catch((error) => pToast(error.message));
+  }
+};
+
 async function loadPromptAuxiliary(project) {
   if (!project || project.status !== "done") return;
   const tasks = [
     loadPromptVersions(project.id),
     loadPromptReviews(project.id),
     loadPromptShares(project.id),
+    loadPromptCost(project.id),
+    loadPromptTemplates(),
   ];
   if (project.reference) tasks.push(loadPromptComparison(project.id));
   await Promise.all(tasks);
@@ -1071,6 +1173,20 @@ document.addEventListener("DOMContentLoaded", () => {
       cancelEdit.closest("[data-prompt-shot-editor]")?.classList.add("hidden");
       return;
     }
+    const applyButton = event.target.closest("[data-apply-template]");
+    if (applyButton && promptState.currentId) {
+      applyTemplate(
+        promptState.currentId,
+        applyButton.dataset.applyTemplate,
+        applyButton.dataset.applyMode || "style"
+      );
+      return;
+    }
+    const deleteTemplateButton = event.target.closest("[data-delete-template]");
+    if (deleteTemplateButton) {
+      deleteTemplate(deleteTemplateButton.dataset.deleteTemplate);
+      return;
+    }
     const cancelPrompt = event.target.closest("[data-cancel-prompt]");
     if (cancelPrompt) {
       cancelPromptProject(cancelPrompt.dataset.cancelPrompt);
@@ -1136,6 +1252,13 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     const remove = event.target.closest("[data-prompt-delete]");
     if (remove) deletePromptProject(remove.dataset.promptDelete);
+  });
+  p$("#prompt-detail").addEventListener("input", (event) => {
+    if (!event.target.closest("#template-search")) return;
+    clearTimeout(promptState.templateTimer);
+    promptState.templateTimer = setTimeout(() => {
+      loadPromptTemplates().catch((error) => pToast(error.message));
+    }, 220);
   });
   p$("#prompt-detail").addEventListener("submit", (event) => {
     const shotEditor = event.target.closest("[data-prompt-shot-editor]");

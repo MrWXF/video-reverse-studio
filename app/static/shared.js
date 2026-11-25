@@ -71,6 +71,28 @@
     return String(minutes).padStart(2, "0") + ":" + seconds.toFixed(1).padStart(4, "0");
   }
 
+  function formatCost(cost) {
+    if (!cost || !cost.priced || cost.estimated_cost === null || cost.estimated_cost === undefined) {
+      return "未配置单价";
+    }
+    const value = Number(cost.estimated_cost || 0);
+    const digits = value > 0 && value < 0.01 ? 6 : 4;
+    return (cost.currency || "USD") + " " + value.toFixed(digits);
+  }
+
+  function usageMarkup(usage, compact = false) {
+    if (!usage) return "";
+    const cost = usage.cost || {};
+    return (
+      '<div class="usage-strip' + (compact ? " is-compact" : "") + '">' +
+        '<div class="usage-metric"><span>CALLS</span><strong>' + esc(formatNumber(cost.calls, 0)) + '</strong></div>' +
+        '<div class="usage-metric"><span>INPUT</span><strong>' + esc(formatNumber(cost.prompt_tokens, 0)) + '</strong><small>tokens</small></div>' +
+        '<div class="usage-metric"><span>OUTPUT</span><strong>' + esc(formatNumber(cost.completion_tokens, 0)) + '</strong><small>tokens</small></div>' +
+        '<div class="usage-metric is-cost"><span>EST. COST</span><strong>' + esc(formatCost(cost)) + '</strong><small>' + esc(cost.note || "估算值") + '</small></div>' +
+      '</div>'
+    );
+  }
+
   global.ReelReverse = {
     $,
     esc,
@@ -79,5 +101,7 @@
     copyText,
     formatNumber,
     formatClock,
+    formatCost,
+    usageMarkup,
   };
 })(window);

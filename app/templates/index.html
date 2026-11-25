@@ -416,6 +416,31 @@
     </div>
   </footer>
 
+  <dialog id="template-dialog" class="template-dialog" aria-labelledby="template-dialog-title">
+    <form id="template-form" class="template-form" data-template-form>
+      <div class="template-dialog-head">
+        <div><span class="panel-kicker">SAVE SHOT TEMPLATE</span><h2 id="template-dialog-title">把这一镜存成模板</h2></div>
+        <button class="template-dialog-close" type="button" data-close-template aria-label="关闭">×</button>
+      </div>
+      <div class="template-dialog-body">
+        <div id="template-preview" class="template-preview"></div>
+        <div class="field-grid">
+          <label class="field wide"><span class="field-label">模板名称</span>
+            <input id="template-name" class="input" type="text" maxlength="100" required /></label>
+          <label class="field"><span class="field-label">分类</span>
+            <input id="template-category" class="input" type="text" maxlength="50" value="自定义" /></label>
+          <label class="field"><span class="field-label">标签（逗号分隔）</span>
+            <input id="template-tags" class="input" type="text" placeholder="广告、产品、暖光" /></label>
+          <label class="field wide"><span class="field-label">说明</span>
+            <textarea id="template-description" class="textarea" rows="2" maxlength="1000" placeholder="这个模板适合什么场景？"></textarea></label>
+        </div>
+      </div>
+      <div class="template-dialog-actions">
+        <button class="btn btn-ghost" type="button" data-close-template>取消</button>
+        <button class="btn btn-primary" type="submit">保存模板</button>
+      </div>
+    </form>
+  </dialog>
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <script src="/static/shared.js"></script>
   <script src="/static/app.js"></script>

@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     llm_base_url: str = ""
     llm_model: str = "gpt-4o-mini"
     vision_model: str = ""
+    llm_input_price_per_million: float = Field(default=0.0, ge=0)
+    llm_output_price_per_million: float = Field(default=0.0, ge=0)
+    cost_currency: str = "USD"
 
     asr_provider: str = "none"
     asr_api_key: str = ""

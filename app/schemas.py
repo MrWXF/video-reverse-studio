@@ -6,6 +6,16 @@ from pydantic import BaseModel, ConfigDict, Field
 Origin = Literal["filmed", "ai_generated", "code_generated", "unknown"]
 PromptLanguage = Literal["en", "zh"]
 ReferenceMode = Literal["style", "structure", "full"]
+TemplateField = Literal[
+    "shot_type",
+    "camera_movement",
+    "lighting",
+    "color_palette",
+    "transition",
+    "prompt",
+    "negative_prompt",
+    "remake_notes",
+]
 
 
 class ShotAnalysis(BaseModel):
@@ -125,6 +135,29 @@ class ShotAnalysisUpdate(BaseModel):
     prompt: str | None = None
     remake_notes: str | None = None
     transcript: str | None = None
+
+
+class ShotTemplateSave(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=1000)
+    category: str = Field(default="自定义", max_length=50)
+    tags: list[str] = Field(default_factory=list)
+
+
+class ShotTemplateApply(BaseModel):
+    template_id: int = Field(ge=1)
+    shot_indices: list[int] = Field(default_factory=list)
+    fields: list[TemplateField] = Field(
+        default_factory=lambda: [
+            "shot_type",
+            "camera_movement",
+            "lighting",
+            "color_palette",
+            "transition",
+        ]
+    )
 
 
 class PromptShot(BaseModel):
