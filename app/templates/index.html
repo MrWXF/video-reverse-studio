@@ -136,6 +136,16 @@
             <span class="field-label">项目名称</span>
             <input id="title" type="text" placeholder="可选，默认使用文件名" maxlength="80" />
           </label>
+          <div id="cost-estimate" class="cost-estimate hidden" aria-live="polite">
+            <div class="cost-estimate-head">
+              <span>ESTIMATE BEFORE ANALYSIS</span>
+              <strong>预计分析成本</strong>
+              <small id="cost-estimate-duration">读取视频时长…</small>
+            </div>
+            <div id="cost-estimate-body">
+              <p class="cost-estimate-note">选择视频后显示预估。</p>
+            </div>
+          </div>
           <button id="upload" class="btn btn-primary block" type="button" disabled>
             <span class="button-label">开始逆向分析</span>
             <span class="arrow" aria-hidden="true">↗</span>

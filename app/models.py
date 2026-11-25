@@ -115,6 +115,11 @@ class PromptProject(Base):
         back_populates="project",
         cascade="all, delete-orphan",
     )
+    generation_jobs: Mapped[list["GenerationJob"]] = relationship(
+        back_populates="project",
+        cascade="all, delete-orphan",
+        order_by="GenerationJob.created_at.desc()",
+    )
 
 
 class PromptVersion(Base):
@@ -245,3 +250,31 @@ class ShotEditEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     project: Mapped["Project"] = relationship(back_populates="edit_events")
+
+
+class GenerationJob(Base):
+    """A durable video-generation run for one prompt project."""
+
+    __tablename__ = "generation_jobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    prompt_project_id: Mapped[str] = mapped_column(
+        ForeignKey("prompt_projects.id", ondelete="CASCADE"), index=True
+    )
+    provider: Mapped[str] = mapped_column(String(40), default="mock")
+    model: Mapped[str] = mapped_column(String(80), default="")
+    status: Mapped[str] = mapped_column(String(30), default="queued", index=True)
+    step: Mapped[str] = mapped_column(String(50), default="queued")
+    progress: Mapped[float] = mapped_column(Float, default=0.0)
+    error: Mapped[str] = mapped_column(Text, default="")
+    request_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    result_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(120), nullable=True, unique=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    project: Mapped["PromptProject"] = relationship(back_populates="generation_jobs")

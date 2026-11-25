@@ -211,6 +211,67 @@ def test_cost_summary_uses_configured_prices(phase1_client):
     assert unpriced["estimated_cost"] is None
 
 
+def test_cost_estimate_uses_duration_and_manual_shots(phase1_client):
+    client, _, _ = phase1_client
+
+    response = client.post(
+        "/api/projects/estimate-cost",
+        json={"video_duration": 60},
+    )
+    assert response.status_code == 200
+    estimate = response.json()
+    assert estimate["video_duration"] == 60.0
+    assert estimate["estimated_shots"] == 18
+    assert estimate["shot_count_source"] == "heuristic"
+    assert estimate["cost"]["calls"] == 18
+    assert estimate["cost"]["prompt_tokens"] == 27_000
+    assert estimate["cost"]["completion_tokens"] == 8_100
+    assert estimate["cost"]["vision_cost"] == 0.0432
+    assert estimate["cost"]["text_cost"] == 0.0
+    assert estimate["cost"]["total_cost"] == 0.0432
+    assert estimate["billable"] is False
+    assert any("MAX_SHOTS" in item for item in estimate["suggestions"])
+    assert any("MOCK" in item.upper() for item in estimate["suggestions"])
+    assert any("视频生成费用" in item for item in estimate["suggestions"])
+
+    manual = client.post(
+        "/api/projects/estimate-cost",
+        json={"video_duration": 60, "estimated_shots": 12},
+    )
+    assert manual.status_code == 200
+    payload = manual.json()
+    assert payload["estimated_shots"] == 12
+    assert payload["shot_count_source"] == "manual"
+    assert payload["cost"]["prompt_tokens"] == 18_000
+    assert not any("MAX_SHOTS" in item for item in payload["suggestions"])
+
+
+def test_cost_estimate_caps_shots_and_handles_unpriced_settings(phase1_client):
+    client, _, settings = phase1_client
+
+    response = client.post(
+        "/api/projects/estimate-cost",
+        json={"video_duration": 120, "estimated_shots": 50},
+    )
+    assert response.status_code == 200
+    estimate = response.json()
+    assert estimate["estimated_shots"] == settings.max_shots
+    assert estimate["requested_shots"] == 50
+    assert any("MAX_SHOTS" in item for item in estimate["suggestions"])
+
+    unpriced = cost.estimate_project_cost(
+        30,
+        None,
+        Settings(
+            llm_input_price_per_million=0,
+            llm_output_price_per_million=0,
+        ),
+    )
+    assert unpriced["cost"]["estimated_cost"] is None
+    assert unpriced["cost"]["vision_cost"] is None
+    assert any("未配置模型单价" in item for item in unpriced["suggestions"])
+
+
 def test_shot_edit_records_audit_event(phase1_client):
     client, _, _ = phase1_client
 
@@ -247,6 +308,10 @@ def test_phase1_frontend_hooks_are_present():
     assert "一键生成复刻方案" in app_js
     assert "SHOT TEMPLATE LIBRARY" in prompt_js
     assert "data-apply-template" in prompt_js
+    assert 'id="cost-estimate"' in html
+    assert "estimate-cost" in app_js
+    assert "costEstimateMarkup" in app_js
     assert "usageMarkup" in shared_js
     assert ".usage-strip" in css
+    assert ".cost-estimate" in css
     assert ".template-dialog" in css

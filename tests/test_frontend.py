@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -72,3 +73,25 @@ def test_frontend_assets_expose_design_system_hooks():
     assert "global.ReelReverse" in shared_js
     assert "window.ReelReverse" in app_js
     assert "window.ReelReverse" in prompt_js
+
+
+def _global_declarations(source: str) -> set[str]:
+    names = set(
+        re.findall(r"(?m)^(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)", source)
+    )
+    for block in re.findall(
+        r"(?ms)^const\s*\{(.*?)\}\s*=\s*window\.ReelReverse;", source
+    ):
+        for item in block.split(","):
+            value = item.split(":", 1)[-1].strip()
+            if value:
+                names.add(value)
+    return names
+
+
+def test_classic_scripts_do_not_redeclare_globals():
+    root = Path(__file__).resolve().parent.parent
+    app_js = (root / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    prompt_js = (root / "app" / "static" / "prompt.js").read_text(encoding="utf-8")
+
+    assert not (_global_declarations(app_js) & _global_declarations(prompt_js))

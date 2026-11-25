@@ -1,5 +1,6 @@
 from .models import (
     DeliveryReview,
+    GenerationJob,
     Job,
     Project,
     PromptComment,
@@ -116,6 +117,38 @@ def prompt_project_payload(
         if reference is not None:
             reference["recipe"] = reference_recipe
     return payload
+
+
+def generation_job_payload(job: GenerationJob) -> dict:
+    result = job.result_json or {}
+    shots: list[dict] = []
+    for stored in result.get("shots") or []:
+        item = dict(stored)
+        filename = item.pop("filename", "")
+        if item.get("status") == "succeeded" and filename:
+            item["download_url"] = (
+                f"/api/generation-jobs/{job.id}/shots/{item.get('shot_index')}/video"
+            )
+        else:
+            item["download_url"] = ""
+        shots.append(item)
+    request_data = job.request_json or {}
+    return {
+        "id": job.id,
+        "prompt_project_id": job.prompt_project_id,
+        "provider": job.provider,
+        "model": job.model,
+        "status": job.status,
+        "step": job.step,
+        "progress": job.progress,
+        "error": job.error,
+        "request": request_data,
+        "shot_indices": request_data.get("shot_indices") or [],
+        "shot_count": len(request_data.get("shot_indices") or []),
+        "result": {"provider": result.get("provider", job.provider), "shots": shots},
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+    }
 
 
 def review_payload(review: DeliveryReview, include_result: bool = False) -> dict:

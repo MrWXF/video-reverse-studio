@@ -6,6 +6,7 @@ const state = {
   stream: null,
   sseFailures: 0,
   refreshPending: false,
+  estimateSeq: 0,
 };
 let recipeCache = { jobId: null, text: "" };
 
@@ -45,6 +46,7 @@ const {
   copyText: copyValue,
   formatNumber,
   formatClock,
+  formatCost,
   usageMarkup,
 } = window.ReelReverse;
 
@@ -57,16 +59,104 @@ function setFile(file) {
   }
   $("#upload").disabled = false;
   $("#dropzone").classList.add("has-file");
+  loadCostEstimate(file).catch(() => {});
 }
 
 function resetFile() {
   state.file = null;
+  state.estimateSeq += 1;
   const input = $("#file");
   if (input) input.value = "";
   const filename = $("#filename");
   if (filename) filename.textContent = "尚未选择文件";
+  const estimate = $("#cost-estimate");
+  if (estimate) estimate.classList.add("hidden");
+  const body = $("#cost-estimate-body");
+  if (body) body.innerHTML = '<p class="cost-estimate-note">选择视频后显示预估。</p>';
   $("#upload").disabled = true;
   $("#dropzone").classList.remove("has-file");
+}
+
+function readVideoDuration(file) {
+  return new Promise((resolve) => {
+    const video = document.createElement("video");
+    const url = URL.createObjectURL(file);
+    let settled = false;
+    let timer = null;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      if (timer) window.clearTimeout(timer);
+      video.removeAttribute("src");
+      video.load();
+      URL.revokeObjectURL(url);
+      resolve(value);
+    };
+    timer = window.setTimeout(() => finish(0), 6000);
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      const duration = Number(video.duration);
+      finish(Number.isFinite(duration) && duration > 0 ? duration : 0);
+    };
+    video.onerror = () => finish(0);
+    video.src = url;
+  });
+}
+
+function compactNumber(value) {
+  const number = Number(value || 0);
+  if (number >= 1000000) return (number / 1000000).toFixed(1) + "M";
+  if (number >= 1000) return (number / 1000).toFixed(1) + "K";
+  return formatNumber(number, 0);
+}
+
+function costEstimateMarkup(data) {
+  const cost = data.cost || {};
+  const suggestions = (data.suggestions || [])
+    .slice(0, 5)
+    .map((item) => '<li>' + esc(item) + '</li>')
+    .join("");
+  const source = data.shot_count_source === "manual" ? "手动镜头数" : "按时长估算";
+  return (
+    '<div class="cost-estimate-metrics">' +
+      '<div><span>SHOTS</span><strong>' + esc(formatNumber(data.estimated_shots, 0)) + '</strong><small>' + esc(source) + '</small></div>' +
+      '<div><span>TOKENS</span><strong>' + esc(compactNumber((cost.prompt_tokens || 0) + (cost.completion_tokens || 0))) + '</strong><small>input + output</small></div>' +
+      '<div class="is-cost"><span>EST. COST</span><strong>' + esc(formatCost(cost)) + '</strong><small>' + esc(cost.priced ? "配置单价估算" : "等待配置单价") + '</small></div>' +
+    '</div>' +
+    '<p class="cost-estimate-note">' + esc(cost.note || "") + '</p>' +
+    (suggestions ? '<ul class="cost-estimate-suggestions">' + suggestions + '</ul>' : "")
+  );
+}
+
+async function loadCostEstimate(file) {
+  const card = $("#cost-estimate");
+  const body = $("#cost-estimate-body");
+  const durationLabel = $("#cost-estimate-duration");
+  if (!card || !body) return;
+  const sequence = ++state.estimateSeq;
+  card.classList.remove("hidden");
+  if (durationLabel) durationLabel.textContent = "读取视频时长…";
+  body.innerHTML = '<p class="cost-estimate-note">正在读取视频时长并估算…</p>';
+  const duration = await readVideoDuration(file);
+  if (sequence !== state.estimateSeq || state.file !== file) return;
+  if (!duration) {
+    if (durationLabel) durationLabel.textContent = "时长不可用";
+    body.innerHTML = '<p class="cost-estimate-note">浏览器无法读取视频时长，跳过上传前预估；分析完成后仍会展示实际成本。</p>';
+    return;
+  }
+  if (durationLabel) durationLabel.textContent = "~" + formatNumber(duration, 1) + "s";
+  try {
+    const estimate = await api("/api/projects/estimate-cost", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ video_duration: duration }),
+    });
+    if (sequence !== state.estimateSeq || state.file !== file) return;
+    body.innerHTML = costEstimateMarkup(estimate);
+  } catch (error) {
+    if (sequence !== state.estimateSeq || state.file !== file) return;
+    body.innerHTML = '<p class="cost-estimate-note">成本预估暂不可用：' + esc(error.message) + '</p>';
+  }
 }
 
 function bindDropzone() {

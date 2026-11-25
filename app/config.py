@@ -28,6 +28,19 @@ class Settings(BaseSettings):
     llm_input_price_per_million: float = Field(default=0.0, ge=0)
     llm_output_price_per_million: float = Field(default=0.0, ge=0)
     cost_currency: str = "USD"
+    cost_estimate_seconds_per_shot: float = Field(default=3.5, ge=0.5, le=60.0)
+    cost_estimate_prompt_tokens_per_shot: int = Field(default=1500, ge=1)
+    cost_estimate_completion_tokens_per_shot: int = Field(default=450, ge=0)
+
+    video_provider: str = "mock"
+    video_model: str = "mock-v1"
+    video_api_key: str = ""
+    video_base_url: str = ""
+    video_request_timeout_s: int = Field(default=180, ge=10, le=1800)
+    video_poll_interval_s: float = Field(default=2.0, ge=0.2, le=60.0)
+    video_timeout_s: int = Field(default=600, ge=30, le=7200)
+    max_active_generation_jobs: int = Field(default=2, ge=1, le=16)
+    generation_retry_attempts: int = Field(default=2, ge=1, le=5)
 
     asr_provider: str = "none"
     asr_api_key: str = ""

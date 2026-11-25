@@ -9,7 +9,12 @@ from sqlalchemy.orm import Session, selectinload
 from ..config import Settings, get_settings
 from ..db import get_db
 from ..models import Job, Project, PromptProject, Shot, ShotEditEvent, ShotTemplate
-from ..schemas import PromptPlan, ShotTemplateApply, ShotTemplateSave
+from ..schemas import (
+    CostEstimateRequest,
+    PromptPlan,
+    ShotTemplateApply,
+    ShotTemplateSave,
+)
 from ..serializers import prompt_project_payload
 from ..services import cost, prompt_versions
 from ..services import shot_templates as template_service
@@ -59,6 +64,22 @@ def prompt_project_cost(project_id: str, db: Session = Depends(get_db)) -> dict:
         "metrics": metrics,
         "cost": cost.estimate_usage(metrics, settings),
     }
+
+
+@router.post(
+    "/api/projects/estimate-cost",
+    summary="预估视频分析成本",
+    description=(
+        "按视频时长、镜头数和配置的 token 单价粗估视觉分析成本。"
+        "不包含 ASR 与真实视频生成费用，结果不代表供应商账单。"
+    ),
+)
+def estimate_project_cost(payload: CostEstimateRequest) -> dict:
+    return cost.estimate_project_cost(
+        payload.video_duration,
+        payload.estimated_shots,
+        get_settings(),
+    )
 
 
 @router.get("/api/projects/{project_id}/edit-events")

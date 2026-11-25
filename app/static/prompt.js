@@ -7,6 +7,7 @@ const promptState = {
   stream: null,
   reviewTimer: null,
   templateTimer: null,
+  generationTimer: null,
   sseFailures: 0,
   refreshPending: false,
 };
@@ -28,6 +29,15 @@ const PROMPT_STEP_HINTS = {
   cancelled: "已取消",
 };
 
+const GENERATION_STATUS_LABELS = {
+  queued: "排队中",
+  running: "生成中",
+  succeeded: "已完成",
+  partial: "部分完成",
+  failed: "失败",
+  cancelled: "已取消",
+};
+
 const {
   $: p$,
   esc: pEsc,
@@ -35,7 +45,7 @@ const {
   api: pApi,
   copyText,
   formatClock: pClock,
-  usageMarkup,
+  usageMarkup: pUsage,
 } = window.ReelReverse;
 
 function referencePaletteMarkup(colors) {
@@ -180,6 +190,13 @@ function promptToolsMarkup(project) {
       '<details class="studio-tool"><summary><div><span class="panel-kicker">COST / USAGE</span><strong>本次生成用量</strong></div>' +
         '<span class="tool-count">TOKENS · EST.</span></summary><div class="tool-body"><div id="prompt-cost">' +
         '<p class="muted">正在计算用量…</p></div></div></details>' +
+      '<details class="studio-tool generation-tool" open><summary><div><span class="panel-kicker">VIDEO GENERATION</span><strong>从提示词生成视频</strong></div>' +
+        '<span id="generation-provider" class="tool-count">读取平台…</span></summary><div class="tool-body generation-body">' +
+        '<div id="generation-capability" class="generation-capability"><p class="muted">正在读取生成平台状态…</p></div>' +
+        '<div class="generation-actions"><button class="btn btn-primary" type="button" data-start-generation="' + pEsc(project.id) + '">生成全部镜头</button>' +
+          '<button class="btn btn-ghost" type="button" data-refresh-generation="' + pEsc(project.id) + '">刷新任务</button></div>' +
+        '<div id="prompt-generation-jobs" class="generation-jobs"><p class="muted">正在读取生成任务…</p></div>' +
+        '</div></details>' +
     '</div>'
   );
 }
@@ -325,6 +342,15 @@ function switchMode(view, syncHash = true) {
   if (view === "generate") {
     loadPromptProjects().catch((error) => pToast(error.message));
     loadReferenceProjects().catch((error) => pToast(error.message));
+  } else {
+    stopGenerationPolling();
+  }
+}
+
+function stopGenerationPolling() {
+  if (promptState.generationTimer) {
+    clearTimeout(promptState.generationTimer);
+    promptState.generationTimer = null;
   }
 }
 
@@ -486,6 +512,7 @@ async function openPromptProject(id) {
   promptState.currentId = id;
   stopPromptPolling();
   stopPromptStream();
+  stopGenerationPolling();
   await loadPromptProjects().catch(() => {});
   const project = await renderPromptProject(id);
   if (project && ["queued", "running"].includes(project.status)) {
@@ -556,6 +583,7 @@ function promptShotCard(shot, position, project) {
         '<div class="prompt-shot-actions">' +
           '<button class="btn btn-ghost" type="button" data-edit-prompt-shot>编辑 / 锁定</button>' +
           '<button class="btn btn-ghost" type="button" data-regenerate-prompt-shot data-shot-index="' + shot.index + '">重生成这镜</button>' +
+          '<button class="btn btn-ghost" type="button" data-generate-prompt-shot="' + pEsc(project.id) + '" data-shot-index="' + shot.index + '">生成视频</button>' +
         '</div>' +
         promptShotEditorMarkup(shot, project) +
       '</div>' +
@@ -917,7 +945,116 @@ async function loadPromptCost(projectId) {
   const box = p$("#prompt-cost");
   if (!box) return;
   const usage = await pApi("/api/prompt-projects/" + projectId + "/cost");
-  box.innerHTML = usageMarkup(usage, true);
+  box.innerHTML = pUsage(usage, true);
+}
+
+function generationShotMarkup(item) {
+  const index = String(item.shot_index || 0).padStart(2, "0");
+  const status = GENERATION_STATUS_LABELS[item.status] || item.status || "未知";
+  const warnings = (item.warnings || []).filter(Boolean);
+  const mediaType = String(item.media_type || "");
+  const media = item.status === "succeeded" && item.download_url
+    ? mediaType.startsWith("image/")
+      ? '<img class="generation-media" src="' + pEsc(item.download_url) + '" alt="镜头 ' + pEsc(index) + ' 生成结果" loading="lazy" />'
+      : '<video class="generation-media" src="' + pEsc(item.download_url) + '" controls preload="metadata"></video>'
+    : "";
+  const size = item.size_bytes ? (Number(item.size_bytes) / 1024).toFixed(0) + " KB" : "";
+  return (
+    '<div class="generation-shot" data-status="' + pEsc(item.status) + '">' +
+      '<div class="generation-shot-head"><div><span>SHOT ' + pEsc(index) + '</span><strong>' + pEsc(status) + '</strong></div>' +
+        (item.download_url ? '<a class="btn btn-ghost" href="' + pEsc(item.download_url) + '" download>下载</a>' : '') + '</div>' +
+      media +
+      '<div class="generation-shot-meta"><span>' + pEsc(Number(item.duration_s || 0).toFixed(1)) + 's</span>' +
+        (size ? '<span>' + pEsc(size) + '</span>' : '') + '</div>' +
+      (warnings.length ? '<p class="generation-note">' + warnings.map((warning) => pEsc(warning)).join("<br>") + '</p>' : '') +
+      (item.error ? '<p class="generation-error">' + pEsc(item.error) + '</p>' : '') +
+    '</div>'
+  );
+}
+
+function generationJobMarkup(job) {
+  const active = ["queued", "running"].includes(job.status);
+  const status = GENERATION_STATUS_LABELS[job.status] || job.status;
+  const shots = (job.result || {}).shots || [];
+  const progress = Math.round(Number(job.progress || 0) * 100);
+  return (
+    '<article class="generation-job" data-status="' + pEsc(job.status) + '">' +
+      '<div class="generation-job-head"><div><span class="panel-kicker">' + pEsc(job.provider || "provider") + ' / ' +
+        pEsc(job.model || "default") + '</span><strong>' + pEsc(status) + '</strong>' +
+        '<small>' + pEsc(job.shot_count || 0) + ' 个镜头 · ' +
+          pEsc(job.created_at ? new Date(job.created_at).toLocaleString("zh-CN") : "—") + '</small></div>' +
+        (active ? '<button class="btn btn-ghost danger-action" type="button" data-cancel-generation="' + pEsc(job.id) + '">取消</button>' : '') +
+      '</div>' +
+      (active
+        ? '<div class="generation-progress"><div><span>正在生成</span><b>' + progress + '%</b></div><i style="width:' + progress + '%"></i></div>'
+        : "") +
+      (job.error ? '<p class="generation-error">' + pEsc(job.error) + '</p>' : "") +
+      (shots.length ? '<div class="generation-shot-grid">' + shots.map(generationShotMarkup).join("") + '</div>' : "") +
+    '</article>'
+  );
+}
+
+async function loadGenerationCapabilities() {
+  const box = p$("#generation-capability");
+  const providerLabel = p$("#generation-provider");
+  if (!box) return;
+  const capability = await pApi("/api/generation/capabilities");
+  if (providerLabel) providerLabel.textContent = capability.label || capability.provider;
+  box.innerHTML =
+    '<div class="generation-capability-row"><span class="generation-provider-badge">' + pEsc(capability.label || capability.provider) + '</span>' +
+      '<span class="generation-state ' + (capability.ready ? "is-ready" : "is-blocked") + '">' +
+        (capability.ready ? "READY" : "NOT CONNECTED") + '</span></div>' +
+    '<p>' + (capability.ready
+      ? "平台由服务端配置，浏览器不会传输第三方密钥。Mock 输出仅用于验证分析到生成的产品流程。"
+      : pEsc(capability.reason || "当前生成平台尚未接入。")) + '</p>';
+  const start = p$("[data-start-generation]");
+  if (start) {
+    start.disabled = !capability.ready;
+    start.title = capability.ready ? "" : (capability.reason || "平台尚未接入");
+  }
+}
+
+async function loadGenerationJobs(projectId) {
+  const box = p$("#prompt-generation-jobs");
+  if (!box) return;
+  const jobs = await pApi("/api/prompt-projects/" + projectId + "/generation-jobs");
+  box.innerHTML = jobs.length
+    ? jobs.map(generationJobMarkup).join("")
+    : '<p class="muted">还没有视频生成任务。可生成全部镜头，或在单个分镜上点击“生成视频”。</p>';
+  stopGenerationPolling();
+  if (jobs.some((job) => ["queued", "running"].includes(job.status))) {
+    promptState.generationTimer = setTimeout(() => {
+      if (promptState.currentId === projectId) {
+        loadGenerationJobs(projectId).catch((error) => pToast(error.message));
+      }
+    }, 1500);
+  }
+}
+
+async function startGeneration(projectId, shotIndices) {
+  const plan = (promptState.currentProject || {}).plan || {};
+  const job = await pApi("/api/prompt-projects/" + projectId + "/generation-jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      shot_indices: shotIndices,
+      aspect_ratio: plan.aspect_ratio || "",
+      model: "",
+    }),
+  });
+  pToast(job.reused ? "已复用相同请求的生成任务" : "视频生成任务已创建");
+  await loadGenerationJobs(projectId);
+}
+
+async function cancelGenerationTask(jobId, projectId) {
+  if (!confirm("确定取消这个视频生成任务？已生成的结果会保留。")) return;
+  try {
+    await pApi("/api/generation-jobs/" + jobId + "/cancel", { method: "POST" });
+    await loadGenerationJobs(projectId);
+    pToast("视频生成任务已取消");
+  } catch (error) {
+    pToast(error.message);
+  }
 }
 
 async function applyTemplate(projectId, templateId, mode) {
@@ -963,6 +1100,8 @@ async function loadPromptAuxiliary(project) {
     loadPromptShares(project.id),
     loadPromptCost(project.id),
     loadPromptTemplates(),
+    loadGenerationCapabilities(),
+    loadGenerationJobs(project.id),
   ];
   if (project.reference) tasks.push(loadPromptComparison(project.id));
   await Promise.all(tasks);
@@ -1117,6 +1256,7 @@ async function deletePromptProject(id) {
       promptState.currentId = null;
       stopPromptPolling();
       stopPromptStream();
+      stopGenerationPolling();
     }
     await loadPromptProjects();
     p$("#prompt-detail").innerHTML =
@@ -1171,6 +1311,32 @@ document.addEventListener("DOMContentLoaded", () => {
     const cancelEdit = event.target.closest("[data-cancel-prompt-edit]");
     if (cancelEdit) {
       cancelEdit.closest("[data-prompt-shot-editor]")?.classList.add("hidden");
+      return;
+    }
+    const startGenerationButton = event.target.closest("[data-start-generation]");
+    if (startGenerationButton) {
+      startGenerationButton.disabled = true;
+      startGeneration(startGenerationButton.dataset.startGeneration, [])
+        .catch((error) => pToast(error.message))
+        .finally(() => { startGenerationButton.disabled = false; });
+      return;
+    }
+    const generateShotButton = event.target.closest("[data-generate-prompt-shot]");
+    if (generateShotButton) {
+      generateShotButton.disabled = true;
+      startGeneration(generateShotButton.dataset.generatePromptShot, [Number(generateShotButton.dataset.shotIndex)])
+        .catch((error) => pToast(error.message))
+        .finally(() => { generateShotButton.disabled = false; });
+      return;
+    }
+    const cancelGenerationButton = event.target.closest("[data-cancel-generation]");
+    if (cancelGenerationButton && promptState.currentId) {
+      cancelGenerationTask(cancelGenerationButton.dataset.cancelGeneration, promptState.currentId);
+      return;
+    }
+    const refreshGeneration = event.target.closest("[data-refresh-generation]");
+    if (refreshGeneration) {
+      loadGenerationJobs(refreshGeneration.dataset.refreshGeneration).catch((error) => pToast(error.message));
       return;
     }
     const applyButton = event.target.closest("[data-apply-template]");

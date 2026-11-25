@@ -197,6 +197,20 @@ class PromptShotUpdate(BaseModel):
     locked_fields: list[str] | None = None
 
 
+class GenerationJobCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    shot_indices: list[int] = Field(default_factory=list)
+    aspect_ratio: str = Field(default="", max_length=20)
+    model: str = Field(default="", max_length=80)
+    idempotency_key: str | None = Field(default=None, max_length=120)
+
+
+class CostEstimateRequest(BaseModel):
+    video_duration: float = Field(gt=0, le=10800)
+    estimated_shots: int | None = Field(default=None, ge=1, le=1000)
+
+
 class ShareCreate(BaseModel):
     permission: Literal["read", "comment"] = "read"
     expires_in_days: int | None = Field(default=None, ge=1, le=365)

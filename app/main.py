@@ -10,13 +10,14 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
+from .api.generation_routes import router as generation_router
 from .api.insight_routes import router as insight_router
 from .api.prompt_routes import router as prompt_router
 from .api.routes import router
 from .api.share_routes import router as share_router
 from .config import PROJECT_ROOT, get_settings
 from .db import SessionLocal, init_db
-from .models import Job, PromptProject
+from .models import GenerationJob, Job, PromptProject
 from .observability import (
     RequestContextMiddleware,
     configure_logging,
@@ -59,6 +60,21 @@ async def lifespan(_: FastAPI):
             logger.warning(
                 "marked %s stale prompt projects as failed", len(stale_prompts)
             )
+        stale_generations = db.scalars(
+            select(GenerationJob).where(
+                GenerationJob.status.in_(["queued", "running"])
+            )
+        ).all()
+        for job in stale_generations:
+            job.status = "failed"
+            job.step = "failed"
+            job.error = "服务重启导致视频生成任务中断，请重新生成"
+            job.updated_at = datetime.now(timezone.utc)
+        if stale_generations:
+            db.commit()
+            logger.warning(
+                "marked %s stale generation jobs as failed", len(stale_generations)
+            )
     yield
 
 
@@ -76,6 +92,7 @@ app.add_middleware(RequestContextMiddleware)
 app.include_router(router, tags=["video-analysis"])
 app.include_router(prompt_router, tags=["prompt-studio"])
 app.include_router(insight_router, tags=["phase1-insights"])
+app.include_router(generation_router, tags=["video-generation"])
 app.include_router(share_router)
 app.mount(
     "/static",
