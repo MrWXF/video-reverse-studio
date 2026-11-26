@@ -5,9 +5,9 @@ from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
@@ -103,6 +103,7 @@ app.mount(
     name="static",
 )
 templates = Jinja2Templates(directory=str(PROJECT_ROOT / "app" / "templates"))
+react_index = PROJECT_ROOT / "app" / "static" / "react" / "index.html"
 
 
 def custom_openapi() -> dict:
@@ -164,3 +165,21 @@ def index(request: Request):
         "index.html",
         {"request": request, "app_name": settings.app_name, "mode": mode},
     )
+
+
+@app.get("/app", include_in_schema=False)
+@app.get("/app/{path:path}", include_in_schema=False)
+def react_frontend(path: str = ""):
+    """Serve the built React application while the legacy screen remains at ``/``.
+
+    The SPA entry point is available only after ``npm run build`` has produced
+    ``app/static/react/index.html``. Returning a clear 404 keeps local setup
+    failures easier to diagnose than silently falling back to the old page.
+    """
+    del path
+    if not react_index.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="React 前端尚未构建，请在 web 目录执行 npm run build",
+        )
+    return FileResponse(react_index)

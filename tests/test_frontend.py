@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from app import main as main_module
 from app import security
 from app.config import Settings, get_settings
 from app.main import app
@@ -115,6 +116,58 @@ def test_timeline_editor_hooks_are_present():
     assert ".timeline-handle" in css
     assert ".timeline-actions" in css
     assert 'html[data-style="b"] .shot-timeline' in css
+
+
+def test_react_app_serves_built_entrypoint(ui_client):
+    response = ui_client.get("/app")
+
+    assert response.status_code == 200
+    assert 'id="root"' in response.text
+    assert 'href="/static/favicon.svg"' in response.text
+    assets = sorted(
+        set(re.findall(r'(?:src|href)="(/static/react/assets/[^"]+)"', response.text))
+    )
+    assert any(path.endswith(".js") for path in assets)
+    assert any(path.endswith(".css") for path in assets)
+    for asset in assets:
+        assert ui_client.get(asset).status_code == 200
+
+    nested = ui_client.get("/app/reverse/demo-project")
+    assert nested.status_code == 200
+    assert 'id="root"' in nested.text
+
+    favicon = ui_client.get("/static/favicon.svg")
+    assert favicon.status_code == 200
+    assert "<svg" in favicon.text
+
+
+def test_react_app_reports_missing_build(ui_client, monkeypatch, tmp_path):
+    monkeypatch.setattr(main_module, "react_index", tmp_path / "missing-index.html")
+
+    response = ui_client.get("/app")
+
+    assert response.status_code == 404
+    assert "npm run build" in response.json()["detail"]
+
+
+def test_react_reverse_workspace_includes_timeline_and_safe_delete():
+    root = Path(__file__).resolve().parent.parent
+    detail = (root / "web" / "src" / "features" / "reverse" / "ProjectDetail.tsx").read_text(
+        encoding="utf-8"
+    )
+    timeline = (
+        root / "web" / "src" / "features" / "reverse" / "TimelineEditor.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert "TimelineEditor" in detail
+    assert "if (deleted)" in detail
+    assert "data-timeline-boundary" in timeline
+    assert "data-timeline-split" in timeline
+    assert "data-timeline-merge" in timeline
+    assert "data-timeline-reanalyze" in timeline
+    assert "onPointerMove" in timeline
+    assert "ArrowLeft" in timeline
+    assert "timeline_min_shot_seconds" in timeline
 
 
 def _global_declarations(source: str) -> set[str]:

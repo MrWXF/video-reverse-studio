@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN" data-style="a">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f8f5ff" />
+    <meta name="description" content="ReelReverse：视频逆向与提示词生成工作台" />
+    <title>ReelReverse · 视频逆向与提示词生成工作台</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <script>
+      try {
+        const requestedStyle = new URLSearchParams(window.location.search).get("style");
+        const savedStyle = localStorage.getItem("reelreverse-style");
+        const style = requestedStyle === "a" || requestedStyle === "b" ? requestedStyle : savedStyle;
+        if (style === "a" || style === "b") {
+          document.documentElement.dataset.style = style;
+        }
+      } catch (_) {}
+    </script>
+    <link rel="stylesheet" href="/static/style.css" />
+    <script type="module" crossorigin src="/static/react/assets/index-CAEp5hhm.js"></script>
+    <link rel="stylesheet" crossorigin href="/static/react/assets/index-DF_TLUSU.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

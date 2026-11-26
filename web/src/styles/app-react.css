@@ -1,0 +1,59 @@
+.react-view {
+  display: block;
+  min-height: calc(100vh - 220px);
+}
+
+.mode-switch a {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 15px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: color 180ms ease, background 180ms ease, box-shadow 180ms ease;
+}
+
+.mode-switch a span {
+  font-family: var(--mono);
+  font-size: 8px;
+  opacity: 0.7;
+}
+
+.mode-switch a:hover {
+  color: var(--ink);
+}
+
+.mode-switch a.active {
+  color: var(--on-accent);
+  background: var(--accent);
+  box-shadow: var(--switch-shadow);
+}
+
+.react-message-panel {
+  margin: 28px 0;
+  padding: 32px;
+}
+
+.react-message-panel h2 {
+  margin: 0 0 10px;
+}
+
+.react-message-panel p {
+  margin: 0 0 20px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.react-split-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.react-detail-loading {
+  padding: 34px;
+}
