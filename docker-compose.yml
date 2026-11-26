@@ -1,0 +1,33 @@
+# 兼容服务器上现有的 docker-compose v1（1.29.2），使用 2.4 语法。
+# 生产环境勿动：enstud 栈依赖宿主机 Docker，不要升级/重启 Docker 守护进程。
+version: "2.4"
+
+services:
+  app:
+    build:
+      context: .
+    image: video-reverse-studio:latest
+    container_name: video-reverse-studio
+    env_file:
+      - .env
+    environment:
+      # 容器内数据目录固定为 /app/data，由下方卷持久化（覆盖 .env 中的相对路径）。
+      - DATA_DIR=/app/data
+    ports:
+      - "127.0.0.1:8900:8900"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    # 服务器仅 4GB 内存且与其他生产服务共用，限制容器内存防 OOM 拖垮 enstud。
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8900/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

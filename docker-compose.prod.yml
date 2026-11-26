@@ -1,0 +1,36 @@
+services:
+  reelreverse:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: reelreverse:prod
+    container_name: reelreverse
+    restart: unless-stopped
+    environment:
+      APP_NAME: ReelReverse
+      DATA_DIR: /srv/app/data
+      APP_USERNAME: ${APP_USERNAME:-admin}
+      APP_PASSWORD: ${APP_PASSWORD:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      VISION_MODEL: ${VISION_MODEL:-}
+      ASR_PROVIDER: ${ASR_PROVIDER:-none}
+      VIDEO_PROVIDER: ${VIDEO_PROVIDER:-mock}
+      VIDEO_API_KEY: ${VIDEO_API_KEY:-}
+      VIDEO_BASE_URL: ${VIDEO_BASE_URL:-}
+      VIDEO_MODEL: ${VIDEO_MODEL:-mock-v1}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-500}
+      MAX_SHOTS: ${MAX_SHOTS:-24}
+      LLM_CONCURRENCY: ${LLM_CONCURRENCY:-2}
+      MAX_ACTIVE_JOBS: ${MAX_ACTIVE_JOBS:-4}
+      MAX_ACTIVE_GENERATION_JOBS: ${MAX_ACTIVE_GENERATION_JOBS:-2}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - reelreverse-data:/srv/app/data
+
+volumes:
+  reelreverse-data:
+
