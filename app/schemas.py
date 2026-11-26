@@ -137,6 +137,18 @@ class ShotAnalysisUpdate(BaseModel):
     transcript: str | None = None
 
 
+class TimelineBoundaryUpdate(BaseModel):
+    boundary_s: float = Field(gt=0)
+
+
+class TimelineSplitRequest(BaseModel):
+    split_at: float = Field(gt=0)
+
+
+class TimelineMergeRequest(BaseModel):
+    shot_ids: list[int] = Field(min_length=2, max_length=2)
+
+
 class ShotTemplateSave(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 

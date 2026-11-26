@@ -535,3 +535,9 @@ def test_phase1_frontend_hooks_are_present():
     assert ".template-dialog" in css
     assert ".template-placeholder-panel" in css
     assert ".template-tag-chip.is-selected" in css
+    assert "timelineMarkup" in app_js
+    assert "data-timeline-boundary" in app_js
+    assert "timeline_min_shot_seconds" in app_js
+    assert "/shots/merge" in app_js
+    assert ".shot-timeline" in css
+    assert ".timeline-handle" in css

@@ -83,6 +83,55 @@ def test_keyframe_route_serves_project_frame(media_client):
     assert response.headers["content-type"].startswith("image/jpeg")
 
 
+def test_video_route_supports_byte_ranges_for_seeking(media_client):
+    client, project_id = media_client
+    response = client.get(
+        f"/api/projects/{project_id}/video",
+        headers={"Range": "bytes=0-4"},
+    )
+
+    assert response.status_code == 206
+    assert response.content == b"video"
+    assert response.headers["accept-ranges"] == "bytes"
+    assert response.headers["content-range"] == "bytes 0-4/11"
+    assert response.headers["content-length"] == "5"
+
+
+def test_video_route_supports_suffix_and_open_ended_ranges(media_client):
+    client, project_id = media_client
+    url = f"/api/projects/{project_id}/video"
+
+    suffix = client.get(url, headers={"Range": "bytes=-5"})
+    assert suffix.status_code == 206
+    assert suffix.content == b"bytes"
+    assert suffix.headers["content-range"] == "bytes 6-10/11"
+
+    open_ended = client.get(url, headers={"Range": "bytes=6-"})
+    assert open_ended.status_code == 206
+    assert open_ended.content == b"bytes"
+
+
+def test_video_route_rejects_unsatisfiable_range(media_client):
+    client, project_id = media_client
+    response = client.get(
+        f"/api/projects/{project_id}/video",
+        headers={"Range": "bytes=99-"},
+    )
+
+    assert response.status_code == 416
+    assert response.headers["content-range"] == "bytes */11"
+
+
+def test_keyframe_route_supports_ranges(media_client):
+    client, project_id = media_client
+    response = client.get(
+        f"/api/projects/{project_id}/shots/1/keyframe",
+        headers={"Range": "bytes=0-3"},
+    )
+    assert response.status_code == 206
+    assert response.content == b"jpeg"
+
+
 def test_project_media_path_rejects_files_outside_project(tmp_path):
     settings = Settings(data_dir=tmp_path)
     outside = tmp_path / "app.db"

@@ -87,6 +87,36 @@ def test_frontend_assets_expose_design_system_hooks():
     assert "window.ReelReverse" in prompt_js
 
 
+def test_timeline_editor_hooks_are_present():
+    root = Path(__file__).resolve().parent.parent
+    css = (root / "app" / "static" / "style.css").read_text(encoding="utf-8")
+    app_js = (root / "app" / "static" / "app.js").read_text(encoding="utf-8")
+
+    assert "function timelineMarkup" in app_js
+    assert "timelineContext" in app_js
+    assert "data-timeline-boundary" in app_js
+    assert "data-timeline-split" in app_js
+    assert "data-timeline-merge" in app_js
+    assert "data-timeline-reanalyze" in app_js
+    assert "/boundary" in app_js
+    assert '"PATCH"' in app_js
+    assert "pointerdown" in app_js
+    assert "pointermove" in app_js
+    assert "pointerup" in app_js
+    assert "ArrowLeft" in app_js
+    assert "ArrowRight" in app_js
+    assert "timeline_min_shot_seconds" in app_js
+    assert "timeline_queued" in app_js
+    assert "timeline_analyzing" in app_js
+    assert app_js.index("mediaBlock +") < app_js.index("timelineBlock +")
+    assert ".shot-timeline" in css
+    assert ".timeline-track" in css
+    assert ".timeline-segment.is-selected" in css
+    assert ".timeline-handle" in css
+    assert ".timeline-actions" in css
+    assert 'html[data-style="b"] .shot-timeline' in css
+
+
 def _global_declarations(source: str) -> set[str]:
     names = set(
         re.findall(r"(?m)^(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)", source)

@@ -8,6 +8,9 @@ const state = {
   refreshPending: false,
   estimateSeq: 0,
   qualityLoading: false,
+  selectedShotId: null,
+  timelineBusy: false,
+  timelineDrag: null,
 };
 let recipeCache = { jobId: null, text: "" };
 
@@ -34,6 +37,12 @@ const STEP_HINTS = {
   transcribing: "正在转写音频",
   analyzing: "正在逐镜分析画面",
   fusing: "正在汇总分镜与节奏",
+  timeline_queued: "时间轴修改已排队",
+  timeline_probing: "正在重新读取视频",
+  timeline_transcribing: "正在校准镜头转录",
+  timeline_extracting: "正在重抽关键帧",
+  timeline_analyzing: "正在重新分析画面",
+  timeline_fusing: "正在重建创作底稿",
   done: "完成",
   failed: "任务失败",
   cancelled: "已取消",
@@ -652,6 +661,245 @@ function summaryMarkup(project, shots) {
   );
 }
 
+function timelineMinimum(project) {
+  const value = Number(project?.timeline_min_shot_seconds);
+  return Number.isFinite(value) && value > 0 ? value : 0.8;
+}
+
+function timelineTotal(project, shots) {
+  const lastEnd = shots.length ? Number(shots[shots.length - 1].end_s || 0) : 0;
+  return Math.max(Number(project.duration || 0), lastEnd, 0.1);
+}
+
+function timelineContext() {
+  const project = state.currentProject;
+  if (!project) return null;
+  const shots = project.shots || [];
+  if (!shots.length) return null;
+  const shot = shots.find((item) => String(item.id) === String(state.selectedShotId)) || shots[0];
+  state.selectedShotId = shot.id;
+  return {
+    project,
+    shots,
+    shot,
+    position: shots.indexOf(shot),
+    minimum: timelineMinimum(project),
+  };
+}
+
+function timelineSplitPoint(shot, minimum) {
+  const lower = roundTimelineValue(Number(shot.start_s) + minimum);
+  const upper = roundTimelineValue(Number(shot.end_s) - minimum);
+  if (lower > upper) return null;
+  const midpoint = roundTimelineValue((Number(shot.start_s) + Number(shot.end_s)) / 2);
+  return Math.min(upper, Math.max(lower, midpoint));
+}
+
+function roundTimelineValue(value) {
+  return Math.round(Number(value || 0) * 1000) / 1000;
+}
+
+function timelineRange(left, right, minimum) {
+  return {
+    lower: roundTimelineValue(Number(left.start_s) + minimum),
+    upper: roundTimelineValue(Number(right.end_s) - minimum),
+  };
+}
+
+function timelineMarkup(project, shots, running) {
+  if (!shots.length) return "";
+  const context = timelineContext();
+  if (!context) return "";
+  const { shot, position, minimum } = context;
+  const total = timelineTotal(project, shots);
+  const locked = running || state.timelineBusy;
+  const splitPoint = timelineSplitPoint(shot, minimum);
+  const canSplit = splitPoint !== null;
+  const canMerge = position < shots.length - 1;
+  const splitValue = splitPoint === null ? "" : splitPoint.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+  const segments = [];
+  const handles = [];
+
+  shots.forEach((item, index) => {
+    const start = Math.max(0, Number(item.start_s || 0));
+    const end = Math.max(start, Number(item.end_s || start));
+    const left = (start / total) * 100;
+    const width = Math.max(0.4, ((end - start) / total) * 100);
+    const tone = (index % 4) + 1;
+    const subject = item.analysis?.subject || item.analysis?.shot_type || "镜头";
+    const selected = String(item.id) === String(shot.id);
+    const frame = item.keyframe_url
+      ? '<img class="timeline-segment-frame" src="' + esc(item.keyframe_url) + '" alt="" loading="lazy" />'
+      : "";
+    segments.push(
+      '<button class="timeline-segment tone-' + tone + (selected ? " is-selected" : "") +
+        '" type="button" data-timeline-shot="' + esc(item.id) + '" data-shot-start="' + start +
+        '" style="left:' + left.toFixed(4) + '%;width:' + width.toFixed(4) + '%" aria-pressed="' +
+        String(selected) + '" title="镜头 ' + esc(String(item.index).padStart(2, "0")) + " · " +
+        esc(subject) + '">' +
+        frame +
+        '<span class="timeline-segment-shade"></span>' +
+        '<span class="timeline-segment-no">' + esc(String(item.index).padStart(2, "0")) + '</span>' +
+        '<span class="timeline-segment-copy"><strong>' + esc(subject) + '</strong><small>' +
+          esc(formatClock(start)) + ' — ' + esc(formatClock(end)) + '</small></span>' +
+      '</button>'
+    );
+
+    if (index < shots.length - 1) {
+      const right = shots[index + 1];
+      const range = timelineRange(item, right, minimum);
+      handles.push(
+        '<button class="timeline-handle" type="button" data-timeline-boundary="' + esc(item.id) +
+          '" data-boundary="' + roundTimelineValue(item.end_s) + '" data-lower="' + range.lower +
+          '" data-upper="' + range.upper + '" role="slider" aria-label="调整镜头 ' +
+          esc(String(item.index).padStart(2, "0")) + ' 与下一镜的边界" aria-orientation="horizontal" aria-valuemin="' +
+          range.lower + '" aria-valuemax="' + range.upper + '" aria-valuenow="' +
+          roundTimelineValue(item.end_s) + '" style="left:' + ((Number(item.end_s) / total) * 100).toFixed(4) +
+          '%"' + (locked ? " disabled" : "") + '>' +
+          '<span class="timeline-handle-time">' + esc(formatClock(item.end_s)) + '</span>' +
+          '<span class="timeline-handle-dot" aria-hidden="true"></span>' +
+        '</button>'
+      );
+    }
+  });
+
+  const ticks = [0, 0.25, 0.5, 0.75, 1]
+    .map((ratio) => '<span style="left:' + (ratio * 100) + '%">' + esc(formatClock(total * ratio)) + '</span>')
+    .join("");
+  const rangeCopy = canSplit
+    ? '拆分点 ' + roundTimelineValue(Number(shot.start_s) + minimum).toFixed(1) + 's — ' +
+      roundTimelineValue(Number(shot.end_s) - minimum).toFixed(1) + 's'
+    : '镜头过短，暂不可拆分';
+
+  return (
+    '<section class="shot-timeline' + (locked ? " is-locked" : "") + '" data-timeline aria-label="镜头时间轴编辑">' +
+      '<div class="timeline-head">' +
+        '<div><span class="panel-kicker">TIMELINE EDITOR</span><h3>时间轴结构编辑</h3></div>' +
+        '<div class="timeline-head-meta"><strong>' + shots.length + '</strong><span>镜头 · ' +
+          esc(formatClock(total)) + '</span></div>' +
+      '</div>' +
+      '<div class="timeline-stage">' +
+        '<div class="timeline-track" data-timeline-track>' + segments.join("") + handles.join("") + '</div>' +
+        '<div class="timeline-scale" aria-hidden="true">' + ticks + '</div>' +
+      '</div>' +
+      '<div class="timeline-actions" data-timeline-actions data-selected-shot-id="' + esc(shot.id) + '">' +
+        '<div class="timeline-selection">' +
+          '<span>SELECTED SHOT</span>' +
+          '<strong data-timeline-selected-label>镜头 ' + esc(String(shot.index).padStart(2, "0")) +
+            ' · ' + esc(formatClock(shot.start_s)) + ' — ' + esc(formatClock(shot.end_s)) + '</strong>' +
+          '<small>点击镜头定位画面；拖动边界手柄，或聚焦手柄后按 ← → 微调。</small>' +
+        '</div>' +
+        '<div class="timeline-controls">' +
+          '<label class="timeline-split-field"><span>拆分点</span>' +
+            '<span class="timeline-input-wrap"><input class="input" data-timeline-split-at type="number" step="0.1" min="' +
+              (canSplit ? roundTimelineValue(Number(shot.start_s) + minimum) : "") + '" max="' +
+              (canSplit ? roundTimelineValue(Number(shot.end_s) - minimum) : "") + '" value="' + splitValue +
+              '" aria-label="新镜头拆分时间（秒）"' + (locked || !canSplit ? " disabled" : "") + ' /><em>s</em></span>' +
+          '</label>' +
+          '<button class="btn btn-secondary" type="button" data-timeline-split' +
+            (locked || !canSplit ? " disabled" : "") + '>拆分镜头</button>' +
+          '<button class="btn btn-ghost" type="button" data-timeline-merge' +
+            (locked || !canMerge ? " disabled" : "") + '>与下一镜合并</button>' +
+          '<button class="btn btn-ghost" type="button" data-timeline-reanalyze' +
+            (locked ? " disabled" : "") + '>重抽帧并重分析</button>' +
+        '</div>' +
+      '</div>' +
+      '<p class="timeline-range-hint" data-timeline-range-hint>' + esc(rangeCopy) + '</p>' +
+    '</section>'
+  );
+}
+
+function seekTimelineShot(start) {
+  const video = $("#detail .video-pane video");
+  if (!video) return;
+  const target = Math.max(0, Number(start || 0));
+  const seek = () => {
+    try {
+      video.currentTime = target;
+    } catch (_) {
+      /* keep the selected shot usable even if the media cannot seek */
+    }
+  };
+  if (video.readyState >= 1) seek();
+  else video.addEventListener("loadedmetadata", seek, { once: true });
+}
+
+function updateTimelineSelection() {
+  const context = timelineContext();
+  if (!context) return;
+  const { project, shots, shot, position, minimum } = context;
+  const running = ["queued", "running"].includes(project.status);
+  const locked = running || state.timelineBusy;
+  const timeline = $("#detail .shot-timeline");
+  if (!timeline) return;
+  const splitPoint = timelineSplitPoint(shot, minimum);
+  const canSplit = splitPoint !== null;
+  const canMerge = position < shots.length - 1;
+
+  timeline.querySelectorAll("[data-timeline-shot]").forEach((segment) => {
+    const selected = String(segment.dataset.timelineShot) === String(shot.id);
+    segment.classList.toggle("is-selected", selected);
+    segment.setAttribute("aria-pressed", String(selected));
+  });
+  document.querySelectorAll("#detail [data-shot-card]").forEach((card) => {
+    card.classList.toggle("is-timeline-selected", String(card.dataset.shotId) === String(shot.id));
+  });
+  timeline.querySelectorAll("[data-timeline-boundary]").forEach((handle) => {
+    handle.disabled = locked;
+  });
+
+  const actions = timeline.querySelector("[data-timeline-actions]");
+  if (actions) actions.dataset.selectedShotId = String(shot.id);
+  const label = timeline.querySelector("[data-timeline-selected-label]");
+  if (label) {
+    label.textContent = "镜头 " + String(shot.index).padStart(2, "0") + " · " +
+      formatClock(shot.start_s) + " — " + formatClock(shot.end_s);
+  }
+  const splitInput = timeline.querySelector("[data-timeline-split-at]");
+  if (splitInput) {
+    splitInput.min = canSplit ? String(roundTimelineValue(Number(shot.start_s) + minimum)) : "";
+    splitInput.max = canSplit ? String(roundTimelineValue(Number(shot.end_s) - minimum)) : "";
+    splitInput.value = splitPoint === null ? "" : String(splitPoint);
+    splitInput.disabled = locked || !canSplit;
+  }
+  const splitButton = timeline.querySelector("[data-timeline-split]");
+  if (splitButton) splitButton.disabled = locked || !canSplit;
+  const mergeButton = timeline.querySelector("[data-timeline-merge]");
+  if (mergeButton) mergeButton.disabled = locked || !canMerge;
+  const reanalyzeButton = timeline.querySelector("[data-timeline-reanalyze]");
+  if (reanalyzeButton) reanalyzeButton.disabled = locked;
+  const hint = timeline.querySelector("[data-timeline-range-hint]");
+  if (hint) {
+    hint.textContent = canSplit
+      ? "拆分点 " + roundTimelineValue(Number(shot.start_s) + minimum).toFixed(1) + "s — " +
+        roundTimelineValue(Number(shot.end_s) - minimum).toFixed(1) + "s"
+      : "镜头过短，暂不可拆分";
+  }
+  timeline.classList.toggle("is-locked", locked);
+}
+
+async function runTimelineMutation(projectId, url, options, successMessage, revertOnError = false) {
+  if (state.timelineBusy) return null;
+  state.timelineBusy = true;
+  updateTimelineSelection();
+  try {
+    const result = await api(url, options);
+    state.timelineBusy = false;
+    recipeCache = { jobId: null, text: "" };
+    toast(successMessage);
+    const fresh = await renderProject(projectId, true);
+    if (fresh) startJobStream(fresh);
+    loadProjects().catch(() => {});
+    return result;
+  } catch (error) {
+    state.timelineBusy = false;
+    toast(error.message);
+    if (revertOnError) await renderProject(projectId, true);
+    else updateTimelineSelection();
+    return null;
+  }
+}
+
 async function renderDetail(project) {
   const job = project.job || {};
   const running = ["queued", "running"].includes(project.status);
@@ -663,7 +911,10 @@ async function renderDetail(project) {
     ensureRecipe(project),
     loadProjectCost(project.id).catch(() => null),
   ]);
+  const selectedShot = shots.find((shot) => String(shot.id) === String(state.selectedShotId)) || shots[0];
+  state.selectedShotId = selectedShot ? selectedShot.id : null;
   const cards = shots.map((shot, index) => shotCard(shot, index, project)).join("");
+  const timelineBlock = timelineMarkup(project, shots, running);
 
   const progressCard = running
     ? '<div class="progress-card">' +
@@ -736,6 +987,7 @@ async function renderDetail(project) {
     progressCard +
     errorCard +
     mediaBlock +
+    timelineBlock +
     shotSection;
 }
 
@@ -752,6 +1004,11 @@ async function renderProject(id, silent = false) {
 }
 
 async function openProject(id) {
+  if (state.currentId !== id) {
+    state.selectedShotId = null;
+    state.timelineDrag = null;
+    state.timelineBusy = false;
+  }
   state.currentId = id;
   stopPolling();
   await loadProjects().catch(() => {});
@@ -947,10 +1204,233 @@ function bindStyleSwitch() {
   });
 }
 
+function timelineBoundaryContext(leftId) {
+  const project = state.currentProject;
+  if (!project) return null;
+  const shots = project.shots || [];
+  const position = shots.findIndex((shot) => String(shot.id) === String(leftId));
+  if (position < 0 || position >= shots.length - 1) return null;
+  const left = shots[position];
+  const right = shots[position + 1];
+  return {
+    project,
+    shots,
+    left,
+    right,
+    position,
+    minimum: timelineMinimum(project),
+    total: timelineTotal(project, shots),
+  };
+}
+
+function selectTimelineShot(segment) {
+  const context = timelineContext();
+  if (!context) return;
+  const shot = context.shots.find((item) => String(item.id) === String(segment.dataset.timelineShot));
+  if (!shot) return;
+  state.selectedShotId = shot.id;
+  updateTimelineSelection();
+  seekTimelineShot(shot.start_s);
+}
+
+function startTimelineBoundaryDrag(event) {
+  const handle = event.target.closest("[data-timeline-boundary]");
+  if (!handle || handle.disabled || event.button !== 0) return;
+  const context = timelineBoundaryContext(handle.dataset.timelineBoundary);
+  const track = handle.closest("[data-timeline-track]");
+  if (!context || !track) return;
+  const leftSegment = track.querySelector('[data-timeline-shot="' + context.left.id + '"]');
+  const rightSegment = track.querySelector('[data-timeline-shot="' + context.right.id + '"]');
+  if (!leftSegment || !rightSegment) return;
+
+  state.selectedShotId = context.left.id;
+  updateTimelineSelection();
+  const original = roundTimelineValue(handle.dataset.boundary);
+  state.timelineDrag = {
+    pointerId: event.pointerId,
+    handle,
+    track,
+    leftSegment,
+    rightSegment,
+    projectId: context.project.id,
+    leftId: context.left.id,
+    leftStart: Number(context.left.start_s),
+    rightEnd: Number(context.right.end_s),
+    total: context.total,
+    lower: Number(handle.dataset.lower),
+    upper: Number(handle.dataset.upper),
+    original,
+    boundary: original,
+    moved: false,
+  };
+  handle.classList.add("is-dragging");
+  track.classList.add("is-dragging");
+  document.body.classList.add("timeline-dragging");
+  try {
+    handle.setPointerCapture(event.pointerId);
+  } catch (_) {
+    /* pointer capture is optional */
+  }
+  event.preventDefault();
+}
+
+function updateTimelineBoundaryPreview(clientX) {
+  const drag = state.timelineDrag;
+  if (!drag) return;
+  const rect = drag.track.getBoundingClientRect();
+  if (!rect.width) return;
+  const raw = ((clientX - rect.left) / rect.width) * drag.total;
+  const boundary = roundTimelineValue(Math.min(drag.upper, Math.max(drag.lower, raw)));
+  const leftPercent = (drag.leftStart / drag.total) * 100;
+  const rightPercent = (drag.rightEnd / drag.total) * 100;
+  const boundaryPercent = (boundary / drag.total) * 100;
+  drag.leftSegment.style.width = Math.max(0.01, boundaryPercent - leftPercent) + "%";
+  drag.rightSegment.style.left = boundaryPercent + "%";
+  drag.rightSegment.style.width = Math.max(0.01, rightPercent - boundaryPercent) + "%";
+  drag.handle.style.left = boundaryPercent + "%";
+  drag.handle.setAttribute("aria-valuenow", String(boundary));
+  const label = drag.handle.querySelector(".timeline-handle-time");
+  if (label) label.textContent = formatClock(boundary);
+  drag.boundary = boundary;
+  drag.moved = Math.abs(boundary - drag.original) >= 0.001;
+}
+
+async function finishTimelineBoundaryDrag(event, cancelled) {
+  const drag = state.timelineDrag;
+  if (!drag) return;
+  if (event.pointerId !== undefined && event.pointerId !== drag.pointerId) return;
+  state.timelineDrag = null;
+  drag.handle.classList.remove("is-dragging");
+  drag.track.classList.remove("is-dragging");
+  document.body.classList.remove("timeline-dragging");
+  try {
+    if (drag.handle.hasPointerCapture(drag.pointerId)) {
+      drag.handle.releasePointerCapture(drag.pointerId);
+    }
+  } catch (_) {
+    /* pointer capture may already be released */
+  }
+
+  if (cancelled || !drag.moved) {
+    if (cancelled && drag.moved) await renderProject(drag.projectId, true);
+    else updateTimelineSelection();
+    return;
+  }
+  await runTimelineMutation(
+    drag.projectId,
+    "/api/projects/" + encodeURIComponent(drag.projectId) + "/shots/" +
+      encodeURIComponent(drag.leftId) + "/boundary",
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ boundary_s: drag.boundary }),
+    },
+    "边界已调整，正在重新分析相邻镜头",
+    true
+  );
+}
+
+function nudgeTimelineBoundary(handle, delta) {
+  if (!handle || handle.disabled || !Number.isFinite(delta) || !delta) return;
+  const lower = Number(handle.dataset.lower);
+  const upper = Number(handle.dataset.upper);
+  const current = Number(handle.dataset.boundary);
+  const boundary = roundTimelineValue(Math.min(upper, Math.max(lower, current + delta)));
+  if (Math.abs(boundary - current) < 0.001) return;
+  const context = timelineBoundaryContext(handle.dataset.timelineBoundary);
+  if (!context) return;
+  runTimelineMutation(
+    context.project.id,
+    "/api/projects/" + encodeURIComponent(context.project.id) + "/shots/" +
+      encodeURIComponent(context.left.id) + "/boundary",
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ boundary_s: boundary }),
+    },
+    "边界已微调，正在重新分析相邻镜头",
+    true
+  );
+}
+
+function splitTimelineShot() {
+  const context = timelineContext();
+  if (!context || state.timelineBusy) return;
+  const input = $("#detail [data-timeline-split-at]");
+  const splitAt = Number(input?.value);
+  const lower = roundTimelineValue(Number(context.shot.start_s) + context.minimum);
+  const upper = roundTimelineValue(Number(context.shot.end_s) - context.minimum);
+  if (!Number.isFinite(splitAt) || splitAt < lower || splitAt > upper) {
+    toast("拆分点必须位于 " + lower.toFixed(1) + "s 到 " + upper.toFixed(1) + "s 之间");
+    input?.focus();
+    return;
+  }
+  runTimelineMutation(
+    context.project.id,
+    "/api/projects/" + encodeURIComponent(context.project.id) + "/shots/" +
+      encodeURIComponent(context.shot.id) + "/split",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ split_at: splitAt }),
+    },
+    "镜头已拆分，正在重新分析"
+  );
+}
+
+function mergeTimelineShot() {
+  const context = timelineContext();
+  if (!context || state.timelineBusy) return;
+  if (context.position >= context.shots.length - 1) {
+    toast("最后一个镜头没有下一镜可合并");
+    return;
+  }
+  const next = context.shots[context.position + 1];
+  runTimelineMutation(
+    context.project.id,
+    "/api/projects/" + encodeURIComponent(context.project.id) + "/shots/merge",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shot_ids: [context.shot.id, next.id] }),
+    },
+    "镜头已合并，正在重新分析"
+  );
+}
+
+function reanalyzeTimelineShot() {
+  const context = timelineContext();
+  if (!context || state.timelineBusy) return;
+  runTimelineMutation(
+    context.project.id,
+    "/api/projects/" + encodeURIComponent(context.project.id) + "/shots/" +
+      encodeURIComponent(context.shot.id) + "/reanalyze",
+    { method: "POST" },
+    "已开始重抽关键帧并重新分析"
+  );
+}
+
 function bindDetail() {
   const detail = $("#detail");
   if (!detail) return;
   detail.addEventListener("click", async (event) => {
+    const timelineShot = event.target.closest("[data-timeline-shot]");
+    if (timelineShot) {
+      selectTimelineShot(timelineShot);
+      return;
+    }
+    if (event.target.closest("[data-timeline-split]")) {
+      splitTimelineShot();
+      return;
+    }
+    if (event.target.closest("[data-timeline-merge]")) {
+      mergeTimelineShot();
+      return;
+    }
+    if (event.target.closest("[data-timeline-reanalyze]")) {
+      reanalyzeTimelineShot();
+      return;
+    }
     const editShot = event.target.closest("[data-edit-shot]");
     if (editShot) {
       const card = editShot.closest("[data-shot-card]");
@@ -1032,6 +1512,27 @@ function bindDetail() {
       });
       expandAll.textContent = allOpen ? "全部展开" : "全部收起";
     }
+  });
+
+  detail.addEventListener("pointerdown", startTimelineBoundaryDrag);
+  detail.addEventListener("pointermove", (event) => {
+    if (!state.timelineDrag || event.pointerId !== state.timelineDrag.pointerId) return;
+    updateTimelineBoundaryPreview(event.clientX);
+    event.preventDefault();
+  });
+  detail.addEventListener("pointerup", (event) => {
+    finishTimelineBoundaryDrag(event, false);
+  });
+  detail.addEventListener("pointercancel", (event) => {
+    finishTimelineBoundaryDrag(event, true);
+  });
+  detail.addEventListener("keydown", (event) => {
+    const handle = event.target.closest("[data-timeline-boundary]");
+    if (!handle || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    const step = event.shiftKey ? 0.5 : 0.1;
+    const delta = (event.key === "ArrowRight" ? step : -step);
+    nudgeTimelineBoundary(handle, delta);
+    event.preventDefault();
   });
 
   detail.addEventListener("submit", async (event) => {

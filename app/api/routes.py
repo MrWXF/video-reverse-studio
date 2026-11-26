@@ -14,12 +14,7 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.responses import (
-    FileResponse,
-    JSONResponse,
-    PlainTextResponse,
-    StreamingResponse,
-)
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -27,9 +22,16 @@ from ..config import Settings, get_settings
 from ..db import get_db
 from ..models import Job, Project, PromptProject, Shot, ShotEditEvent
 from ..observability import current_request_id
-from ..schemas import ShotAnalysis, ShotAnalysisUpdate
+from ..schemas import (
+    ShotAnalysis,
+    ShotAnalysisUpdate,
+    TimelineBoundaryUpdate,
+    TimelineMergeRequest,
+    TimelineSplitRequest,
+)
 from ..serializers import job_payload, project_payload, shot_payload
-from ..services import capacity, media, pipeline, sse, uploads
+from ..services import capacity, media, pipeline, sse, timeline, uploads
+from ..services.http_range import range_file_response
 from ..services.reference import (
     aspect_ratio_for,
     build_reference_context,
@@ -156,7 +158,13 @@ def list_projects(db: Session = Depends(get_db)) -> list[dict]:
             .order_by(Job.created_at.desc())
             .limit(1)
         )
-        payload.append(project_payload(project, job))
+        payload.append(
+            project_payload(
+                project,
+                job,
+                timeline_min_shot_seconds=get_settings().min_shot_seconds,
+            )
+        )
     return payload
 
 
@@ -175,7 +183,12 @@ def get_project(project_id: str, db: Session = Depends(get_db)) -> dict:
         .order_by(Job.created_at.desc())
         .limit(1)
     )
-    payload = project_payload(project, job, include_shots=True)
+    payload = project_payload(
+        project,
+        job,
+        include_shots=True,
+        timeline_min_shot_seconds=get_settings().min_shot_seconds,
+    )
     prompt_projects = db.scalars(
         select(PromptProject)
         .where(PromptProject.source_project_id == project_id)
@@ -222,23 +235,32 @@ def get_reference_context(project_id: str, db: Session = Depends(get_db)) -> dic
 
 
 @router.get("/api/projects/{project_id}/video")
-def get_project_video(project_id: str, db: Session = Depends(get_db)):
+def get_project_video(
+    project_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="项目不存在")
     path = _project_media_path(project_id, project.source_path, get_settings())
-    return FileResponse(path)
+    return range_file_response(path, request)
 
 
 @router.get("/api/projects/{project_id}/shots/{shot_id}/keyframe")
-def get_shot_keyframe(project_id: str, shot_id: int, db: Session = Depends(get_db)):
+def get_shot_keyframe(
+    project_id: str,
+    shot_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
     shot = db.scalar(
         select(Shot).where(Shot.id == shot_id, Shot.project_id == project_id)
     )
     if shot is None or not shot.keyframe_path:
         raise HTTPException(status_code=404, detail="文件不存在")
     path = _project_media_path(project_id, shot.keyframe_path, get_settings())
-    return FileResponse(path)
+    return range_file_response(path, request)
 
 
 @router.patch("/api/projects/{project_id}/shots/{shot_id}")
@@ -295,6 +317,151 @@ def update_shot_analysis(
     db.commit()
     rebuild_project_recipe(project, get_settings())
     return shot_payload(shot)
+
+
+def _timeline_response(mutation: timeline.TimelineMutation) -> dict:
+    return {
+        "job_id": mutation.job_id,
+        "status": "queued",
+        "action": mutation.action,
+        "affected_shot_ids": mutation.affected_shot_ids,
+        "prompt_projects_invalidated": mutation.prompt_projects_invalidated,
+    }
+
+
+def _timeline_error(exc: timeline.TimelineError) -> HTTPException:
+    if isinstance(exc, timeline.TimelineNotFoundError):
+        status_code = 404
+    elif isinstance(exc, timeline.TimelineConflictError):
+        status_code = 409
+    elif isinstance(exc, timeline.TimelineCapacityError):
+        status_code = 503
+    else:
+        status_code = 422
+    return HTTPException(status_code=status_code, detail=str(exc))
+
+
+def _timeline_project(db: Session, project_id: str) -> Project:
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    return project
+
+
+@router.patch(
+    "/api/projects/{project_id}/shots/{shot_id}/boundary",
+    status_code=202,
+    summary="调整相邻镜头边界",
+)
+def update_timeline_boundary(
+    project_id: str,
+    shot_id: int,
+    payload: TimelineBoundaryUpdate,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> dict:
+    project = _timeline_project(db, project_id)
+    settings = get_settings()
+    try:
+        mutation = timeline.update_boundary(
+            db, project, shot_id, payload.boundary_s, settings
+        )
+    except timeline.TimelineError as exc:
+        db.rollback()
+        raise _timeline_error(exc) from exc
+    background.add_task(
+        timeline.run_timeline_reanalysis,
+        project_id,
+        mutation.job_id,
+        mutation.affected_shot_ids,
+    )
+    return _timeline_response(mutation)
+
+
+@router.post(
+    "/api/projects/{project_id}/shots/{shot_id}/split",
+    status_code=202,
+    summary="拆分镜头",
+)
+def split_timeline_shot(
+    project_id: str,
+    shot_id: int,
+    payload: TimelineSplitRequest,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> dict:
+    project = _timeline_project(db, project_id)
+    settings = get_settings()
+    try:
+        mutation = timeline.split_shot(
+            db, project, shot_id, payload.split_at, settings
+        )
+    except timeline.TimelineError as exc:
+        db.rollback()
+        raise _timeline_error(exc) from exc
+    background.add_task(
+        timeline.run_timeline_reanalysis,
+        project_id,
+        mutation.job_id,
+        mutation.affected_shot_ids,
+    )
+    return _timeline_response(mutation)
+
+
+@router.post(
+    "/api/projects/{project_id}/shots/merge",
+    status_code=202,
+    summary="合并相邻镜头",
+)
+def merge_timeline_shots(
+    project_id: str,
+    payload: TimelineMergeRequest,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> dict:
+    project = _timeline_project(db, project_id)
+    settings = get_settings()
+    try:
+        mutation = timeline.merge_shots(
+            db, project, payload.shot_ids, settings
+        )
+    except timeline.TimelineError as exc:
+        db.rollback()
+        raise _timeline_error(exc) from exc
+    background.add_task(
+        timeline.run_timeline_reanalysis,
+        project_id,
+        mutation.job_id,
+        mutation.affected_shot_ids,
+    )
+    return _timeline_response(mutation)
+
+
+@router.post(
+    "/api/projects/{project_id}/shots/{shot_id}/reanalyze",
+    status_code=202,
+    summary="重抽关键帧并重新分析镜头",
+)
+def reanalyze_timeline_shot(
+    project_id: str,
+    shot_id: int,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> dict:
+    project = _timeline_project(db, project_id)
+    settings = get_settings()
+    try:
+        mutation = timeline.queue_reanalysis(db, project, shot_id, settings)
+    except timeline.TimelineError as exc:
+        db.rollback()
+        raise _timeline_error(exc) from exc
+    background.add_task(
+        timeline.run_timeline_reanalysis,
+        project_id,
+        mutation.job_id,
+        mutation.affected_shot_ids,
+    )
+    return _timeline_response(mutation)
 
 
 @router.post(

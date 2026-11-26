@@ -47,6 +47,7 @@ def project_payload(
     project: Project,
     job: Job | None = None,
     include_shots: bool = False,
+    timeline_min_shot_seconds: float | None = None,
 ) -> dict:
     payload = {
         "id": project.id,
@@ -56,6 +57,7 @@ def project_payload(
         "width": project.width,
         "height": project.height,
         "fps": project.fps,
+        "timeline_min_shot_seconds": timeline_min_shot_seconds,
         "shot_count": len(project.shots) if project.shots else 0,
         "created_at": project.created_at.isoformat() if project.created_at else None,
         "video_url": f"/api/projects/{project.id}/video",
