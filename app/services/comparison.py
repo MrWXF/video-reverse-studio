@@ -1,7 +1,10 @@
+"""Compare generated prompt plans with their reference-video snapshots."""
+
 from ..schemas import PromptPlan, Recipe
 
 
 def _palette(shots) -> list[str]:
+    """Collect unique, lower-cased palette colors across shots."""
     colors: list[str] = []
     for shot in shots:
         for color in getattr(shot, "color_palette", []) or []:
@@ -12,6 +15,7 @@ def _palette(shots) -> list[str]:
 
 
 def _overlap(left: list[str], right: list[str]) -> float:
+    """Return the Jaccard overlap of two colour sets."""
     if not left or not right:
         return 0.0
     left_set = {item.strip().lower() for item in left if item}
@@ -24,6 +28,11 @@ def build_reference_comparison(
     mode: str,
     plan: PromptPlan,
 ) -> dict:
+    """Score generated shots against their mapped reference shots.
+
+    The result includes structure checks, mapped-shot coverage, palette overlap,
+    and the style fields needed by the comparison UI.
+    """
     recipe = Recipe.model_validate(reference_snapshot["recipe"])
     reference_shots = {shot.index: shot for shot in recipe.shots}
     generated_shots = plan.shots

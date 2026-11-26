@@ -1,3 +1,5 @@
+"""Environment-backed application settings and shared path constants."""
+
 from functools import lru_cache
 from pathlib import Path
 
@@ -8,6 +10,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
+    """Validated runtime configuration loaded from environment variables and ``.env``."""
+
     model_config = SettingsConfigDict(
         env_file=str(PROJECT_ROOT / ".env"),
         env_file_encoding="utf-8",
@@ -69,10 +73,12 @@ class Settings(BaseSettings):
     @field_validator("data_dir")
     @classmethod
     def _resolve_data_dir(cls, value: Path) -> Path:
+        """Resolve relative data paths against the repository root."""
         return value if value.is_absolute() else (PROJECT_ROOT / value).resolve()
 
     @property
     def db_url(self) -> str:
+        """Return the configured database URL or the default SQLite file URL."""
         if self.database_url:
             return self.database_url
         return f"sqlite:///{(self.data_dir / 'app.db').as_posix()}"
@@ -80,6 +86,7 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    """Load cached settings once and ensure the data directory exists."""
     settings = Settings()
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     return settings

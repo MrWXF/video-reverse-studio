@@ -1,3 +1,5 @@
+"""Target-model profiles and prompt-plan validation rules."""
+
 from ..schemas import PromptPlan
 
 _PROFILES: dict[str, dict] = {
@@ -77,6 +79,7 @@ _ALIASES = {
 
 
 def get_model_profile(name: str) -> dict:
+    """Resolve a model alias to a profile, falling back to the generic profile."""
     key = (name or "generic").strip().lower()
     key = _ALIASES.get(key, key)
     if key not in _PROFILES:
@@ -85,10 +88,12 @@ def get_model_profile(name: str) -> dict:
 
 
 def model_profile_options() -> list[dict]:
+    """Return all selectable model profiles for the frontend."""
     return [{"id": key, **value} for key, value in _PROFILES.items()]
 
 
 def validate_prompt_plan(plan: PromptPlan, total_duration: float) -> list[str]:
+    """Return non-blocking prompt, ratio, and shot-duration warnings for a target model."""
     profile = plan.target_profile or get_model_profile(plan.target_model)
     warnings: list[str] = []
     max_prompt = int(profile.get("max_prompt_chars") or 0)

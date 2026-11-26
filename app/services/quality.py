@@ -29,6 +29,7 @@ FIELD_LABELS = {
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
+    """Normalize a datetime to timezone-aware UTC."""
     if value is None:
         return None
     if value.tzinfo is None:
@@ -37,18 +38,21 @@ def _as_utc(value: datetime | None) -> datetime | None:
 
 
 def _ratio(numerator: int, denominator: int) -> float | None:
+    """Return a rounded ratio, or ``None`` when the denominator is zero."""
     if denominator <= 0:
         return None
     return round(numerator / denominator, 4)
 
 
 def _shot_key(event: ShotEditEvent) -> tuple[str, str | int]:
+    """Build a stable project/shot key for grouping edit events."""
     if event.shot_id is not None:
         return event.project_id, event.shot_id
     return event.project_id, f"index:{event.shot_index}"
 
 
 def _has_field(event: ShotEditEvent, field: str) -> bool:
+    """Return whether an edit event changed the requested field."""
     return field in (event.changes or {})
 
 

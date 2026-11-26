@@ -1,3 +1,5 @@
+"""Render reverse-engineering recipes as Markdown or JSON artifacts."""
+
 import json
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -21,6 +23,7 @@ _env = Environment(
 
 
 def render_markdown(recipe: Recipe) -> str:
+    """Render a recipe with the bundled Markdown template."""
     template = _env.get_template("video.md.j2")
     return template.render(
         recipe=recipe,
@@ -29,4 +32,5 @@ def render_markdown(recipe: Recipe) -> str:
 
 
 def render_json(recipe: Recipe) -> str:
+    """Serialize a recipe as indented UTF-8 JSON."""
     return json.dumps(recipe.model_dump(mode="json"), ensure_ascii=False, indent=2)

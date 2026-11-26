@@ -1,3 +1,5 @@
+"""Convert SQLAlchemy models into JSON-safe API payloads."""
+
 from .models import (
     DeliveryReview,
     GenerationJob,
@@ -11,6 +13,7 @@ from .models import (
 
 
 def shot_payload(shot: Shot) -> dict:
+    """Serialize a shot and derive its keyframe URL when a file exists."""
     keyframe_url = (
         f"/api/projects/{shot.project_id}/shots/{shot.id}/keyframe"
         if shot.keyframe_path
@@ -30,6 +33,7 @@ def shot_payload(shot: Shot) -> dict:
 
 
 def job_payload(job: Job | None) -> dict | None:
+    """Serialize the latest analysis job, preserving ``None`` for projects without one."""
     if job is None:
         return None
     return {
@@ -49,6 +53,7 @@ def project_payload(
     include_shots: bool = False,
     timeline_min_shot_seconds: float | None = None,
 ) -> dict:
+    """Build a project summary, optionally embedding its ordered shots."""
     payload = {
         "id": project.id,
         "title": project.title,
@@ -73,6 +78,7 @@ def prompt_project_payload(
     project: PromptProject,
     include_plan: bool = False,
 ) -> dict:
+    """Serialize prompt metadata and optionally reveal the full plan and reference recipe."""
     brief = project.brief_json or {}
     plan = project.plan_json or {}
     snapshot = project.reference_snapshot_json or {}
@@ -122,6 +128,7 @@ def prompt_project_payload(
 
 
 def generation_job_payload(job: GenerationJob) -> dict:
+    """Serialize a generation job and replace storage filenames with download URLs."""
     result = job.result_json or {}
     shots: list[dict] = []
     for stored in result.get("shots") or []:
@@ -154,6 +161,7 @@ def generation_job_payload(job: GenerationJob) -> dict:
 
 
 def review_payload(review: DeliveryReview, include_result: bool = False) -> dict:
+    """Serialize delivery-review progress and optionally its detailed result."""
     payload = {
         "id": review.id,
         "filename": review.filename,
@@ -170,6 +178,7 @@ def review_payload(review: DeliveryReview, include_result: bool = False) -> dict
 
 
 def share_payload(share: PromptShare, version_number: int | None = None) -> dict:
+    """Serialize a share link together with its pinned version number, when known."""
     return {
         "id": share.id,
         "token": share.token,
@@ -184,6 +193,7 @@ def share_payload(share: PromptShare, version_number: int | None = None) -> dict
 
 
 def comment_payload(comment: PromptComment) -> dict:
+    """Serialize a public share comment."""
     return {
         "id": comment.id,
         "author": comment.author,

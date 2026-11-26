@@ -1,3 +1,5 @@
+"""HTTP endpoints for video upload, analysis, timeline editing, and media delivery."""
+
 import json
 import shutil
 import uuid
@@ -43,6 +45,7 @@ ALLOWED_SUFFIXES = uploads.VIDEO_SUFFIXES
 
 
 def _project_media_path(project_id: str, stored_path: str, settings: Settings) -> Path:
+    """Resolve a stored path and reject files outside the project's media directory."""
     root = pipeline.project_dir(project_id, settings).resolve()
     path = Path(stored_path)
     if not path.is_absolute():
@@ -55,6 +58,7 @@ def _project_media_path(project_id: str, stored_path: str, settings: Settings) -
 
 @router.get("/healthz")
 def healthz() -> dict:
+    """Return service readiness, provider configuration, media tools, and job capacity."""
     settings = get_settings()
     return {
         "status": "ok",
@@ -89,6 +93,7 @@ def create_project(
     title: str = Form(""),
     db: Session = Depends(get_db),
 ) -> dict:
+    """Validate and persist an upload, then queue the full analysis pipeline."""
     settings = get_settings()
     if not capacity.has_capacity(settings.max_active_jobs):
         raise HTTPException(status_code=503, detail="当前分析任务已达并发上限，请稍后重试")
@@ -145,6 +150,7 @@ def create_project(
 
 @router.get("/api/projects")
 def list_projects(db: Session = Depends(get_db)) -> list[dict]:
+    """List projects newest-first with their latest job summary and shot data."""
     projects = db.scalars(
         select(Project)
         .options(selectinload(Project.shots))
@@ -170,6 +176,7 @@ def list_projects(db: Session = Depends(get_db)) -> list[dict]:
 
 @router.get("/api/projects/{project_id}")
 def get_project(project_id: str, db: Session = Depends(get_db)) -> dict:
+    """Return a project, its shots, and prompt projects linked to this analysis."""
     project = db.scalar(
         select(Project)
         .options(selectinload(Project.shots))
@@ -208,6 +215,7 @@ def get_project(project_id: str, db: Session = Depends(get_db)) -> dict:
 
 @router.get("/api/projects/{project_id}/reference-context")
 def get_reference_context(project_id: str, db: Session = Depends(get_db)) -> dict:
+    """Return reusable reference context plus suggested prompt-project defaults."""
     project = db.scalar(
         select(Project)
         .options(selectinload(Project.shots))
@@ -240,6 +248,7 @@ def get_project_video(
     request: Request,
     db: Session = Depends(get_db),
 ):
+    """Stream the source video with byte-range support for browser seeking."""
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -254,6 +263,7 @@ def get_shot_keyframe(
     request: Request,
     db: Session = Depends(get_db),
 ):
+    """Stream a shot keyframe with byte-range support."""
     shot = db.scalar(
         select(Shot).where(Shot.id == shot_id, Shot.project_id == project_id)
     )
@@ -270,6 +280,11 @@ def update_shot_analysis(
     update: ShotAnalysisUpdate,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Apply manual shot edits, record changed fields, and rebuild the project recipe.
+
+    Editing is rejected while the project has an active analysis job. The
+    database commit happens before the derived recipe is rebuilt.
+    """
     project = db.scalar(
         select(Project)
         .options(selectinload(Project.shots))
@@ -320,6 +335,7 @@ def update_shot_analysis(
 
 
 def _timeline_response(mutation: timeline.TimelineMutation) -> dict:
+    """Serialize a queued timeline mutation for the HTTP response."""
     return {
         "job_id": mutation.job_id,
         "status": "queued",
@@ -330,6 +346,7 @@ def _timeline_response(mutation: timeline.TimelineMutation) -> dict:
 
 
 def _timeline_error(exc: timeline.TimelineError) -> HTTPException:
+    """Map timeline domain errors to their public HTTP status codes."""
     if isinstance(exc, timeline.TimelineNotFoundError):
         status_code = 404
     elif isinstance(exc, timeline.TimelineConflictError):
@@ -342,6 +359,7 @@ def _timeline_error(exc: timeline.TimelineError) -> HTTPException:
 
 
 def _timeline_project(db: Session, project_id: str) -> Project:
+    """Load a project or raise a 404 for timeline endpoints."""
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -360,6 +378,12 @@ def update_timeline_boundary(
     background: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Move a boundary between adjacent shots and queue targeted re-analysis.
+
+    The service commits the timeline mutation and queues a job before the
+    background task starts. Linked prompt projects are warned that their
+    reference mapping may have changed.
+    """
     project = _timeline_project(db, project_id)
     settings = get_settings()
     try:
@@ -390,6 +414,7 @@ def split_timeline_shot(
     background: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Split one shot at a validated timestamp and queue targeted re-analysis."""
     project = _timeline_project(db, project_id)
     settings = get_settings()
     try:
@@ -419,6 +444,7 @@ def merge_timeline_shots(
     background: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Merge two adjacent shots and queue re-analysis for the merged shot."""
     project = _timeline_project(db, project_id)
     settings = get_settings()
     try:
@@ -448,6 +474,7 @@ def reanalyze_timeline_shot(
     background: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Queue keyframe extraction and analysis for one existing shot."""
     project = _timeline_project(db, project_id)
     settings = get_settings()
     try:
@@ -476,6 +503,7 @@ def reanalyze(
     background: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Queue a full analysis when no project job is active and capacity is available."""
     settings = get_settings()
     if not capacity.has_capacity(settings.max_active_jobs):
         raise HTTPException(status_code=503, detail="当前分析任务已达并发上限，请稍后重试")
@@ -509,6 +537,7 @@ def get_recipe(
     format: str = "md",
     db: Session = Depends(get_db),
 ):
+    """Download the generated recipe as Markdown or JSON."""
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -535,6 +564,7 @@ def get_recipe(
 
 @router.get("/api/jobs/{job_id}")
 def get_job(job_id: str, db: Session = Depends(get_db)) -> dict:
+    """Return the current status, progress, and metrics for one job."""
     job = db.get(Job, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -543,6 +573,7 @@ def get_job(job_id: str, db: Session = Depends(get_db)) -> dict:
 
 @router.get("/api/jobs/{job_id}/events")
 def job_events(job_id: str, request: Request, db: Session = Depends(get_db)):
+    """Stream job status changes as server-sent events."""
     if db.get(Job, job_id) is None:
         raise HTTPException(status_code=404, detail="任务不存在")
     return StreamingResponse(
@@ -558,6 +589,7 @@ def job_events(job_id: str, request: Request, db: Session = Depends(get_db)):
 
 @router.post("/api/projects/{project_id}/cancel", status_code=202)
 def cancel_project(project_id: str, db: Session = Depends(get_db)) -> dict:
+    """Mark the active project job cancelled and mirror that state on the project."""
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -583,6 +615,11 @@ def cancel_project(project_id: str, db: Session = Depends(get_db)) -> dict:
 
 @router.delete("/api/projects/{project_id}")
 def delete_project(project_id: str, db: Session = Depends(get_db)) -> dict:
+    """Delete a project record and its managed media directory.
+
+    The filesystem removal is restricted to the configured projects root and
+    happens only after the database deletion succeeds.
+    """
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="项目不存在")

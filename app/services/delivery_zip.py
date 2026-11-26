@@ -1,3 +1,5 @@
+"""Build downloadable ZIP packages for prompt plans, versions, and reference assets."""
+
 import csv
 import io
 import json
@@ -12,6 +14,7 @@ from . import recipe as recipe_service
 
 
 def _clock_srt(seconds: float) -> str:
+    """Format seconds as an SRT timestamp with millisecond precision."""
     milliseconds = max(0, round(float(seconds) * 1000))
     hours, remainder = divmod(milliseconds, 3_600_000)
     minutes, remainder = divmod(remainder, 60_000)
@@ -20,6 +23,7 @@ def _clock_srt(seconds: float) -> str:
 
 
 def render_shots_csv(plan: PromptPlan) -> str:
+    """Render the shot table as UTF-8 CSV for spreadsheet workflows."""
     output = io.StringIO(newline="")
     writer = csv.writer(output)
     writer.writerow(
@@ -65,6 +69,7 @@ def render_shots_csv(plan: PromptPlan) -> str:
 
 
 def render_shots_srt(plan: PromptPlan) -> str:
+    """Render per-shot timing and text as an SRT subtitle skeleton."""
     blocks = []
     for position, shot in enumerate(plan.shots, start=1):
         text = " / ".join(
@@ -77,6 +82,7 @@ def render_shots_srt(plan: PromptPlan) -> str:
 
 
 def _keyframe_path(settings: Settings, shot: Shot) -> Path | None:
+    """Resolve an existing keyframe path relative to the data directory."""
     if not shot.keyframe_path:
         return None
     path = Path(shot.keyframe_path)
@@ -92,6 +98,7 @@ def build_prompt_zip(
     settings: Settings,
     source_project: Project | None = None,
 ) -> bytes:
+    """Build a self-contained delivery ZIP with plan, versions, manifest, and assets."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("prompt-plan.md", prompt_export.render_prompt_markdown(plan))

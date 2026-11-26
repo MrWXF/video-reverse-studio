@@ -14,10 +14,13 @@ CHUNK_SIZE = 64 * 1024
 
 
 class RangeNotSatisfiable(ValueError):
+    """The requested byte range is invalid for the current file."""
+
     pass
 
 
 def _parse_range(value: str, size: int) -> tuple[int, int]:
+    """Parse a single HTTP byte-range header into inclusive offsets."""
     unit, separator, raw = value.partition("=")
     if separator != "=" or unit.strip().lower() != "bytes" or "," in raw:
         raise RangeNotSatisfiable(value)
@@ -42,6 +45,7 @@ def _parse_range(value: str, size: int) -> tuple[int, int]:
 
 
 def _file_chunks(path: Path, start: int, length: int) -> Iterator[bytes]:
+    """Yield a bounded file region in streaming chunks."""
     with path.open("rb") as handle:
         handle.seek(start)
         remaining = length
@@ -54,6 +58,7 @@ def _file_chunks(path: Path, start: int, length: int) -> Iterator[bytes]:
 
 
 def range_file_response(path: Path, request: Request) -> Response:
+    """Return a full or partial file response with browser-seekable range headers."""
     size = path.stat().st_size
     media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     common_headers = {

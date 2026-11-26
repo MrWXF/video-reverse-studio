@@ -1,3 +1,5 @@
+"""Image-based shot analysis through the configured multimodal model gateway."""
+
 import base64
 import logging
 from pathlib import Path
@@ -17,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 def _data_url(image_path: Path) -> str:
+    """Encode a JPEG keyframe as an inline data URL."""
     encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
     return f"data:image/jpeg;base64,{encoded}"
 
@@ -28,6 +31,7 @@ def _user_text(
     transcript: str,
     meta: VideoMeta,
 ) -> str:
+    """Build the multimodal user message describing one shot and its timing."""
     lines = [
         f"镜头序号：{index}",
         f"时间区间：{start_s:.2f}s - {end_s:.2f}s（时长 {end_s - start_s:.2f}s）",

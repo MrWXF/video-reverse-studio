@@ -1,3 +1,5 @@
+"""Extract style, structure, and recipe context from completed reverse-analysis projects."""
+
 from collections import Counter
 from pathlib import Path
 
@@ -19,6 +21,7 @@ _ASPECTS = [
 
 
 def aspect_ratio_for(width: int, height: int) -> str:
+    """Map pixel dimensions to the nearest supported aspect-ratio label."""
     if not width or not height:
         return "16:9"
     target = width / height
@@ -29,6 +32,7 @@ def build_reference_context(
     project: Project,
     mode: ReferenceMode = "style",
 ) -> ReferenceContext:
+    """Build a frozen reference context from a completed reverse-analysis project."""
     rows = []
     for shot in project.shots:
         analysis = ShotAnalysis.model_validate(shot.analysis or {})
@@ -57,6 +61,7 @@ def build_reference_context(
 
 
 def compact_reference(context: ReferenceContext) -> dict:
+    """Reduce a reference recipe to the style and structure fields sent to the model."""
     recipe = context.recipe
     shots = recipe.shots
     shot_types = Counter(shot.shot_type for shot in shots)

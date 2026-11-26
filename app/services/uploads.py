@@ -1,3 +1,5 @@
+"""Upload filename, content-signature, size, and text-sanitization helpers."""
+
 import re
 from pathlib import Path
 
@@ -6,10 +8,14 @@ _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 
 class UploadValidationError(ValueError):
+    """The uploaded file failed signature or format validation."""
+
     pass
 
 
 class UploadTooLargeError(UploadValidationError):
+    """The uploaded file exceeded the configured byte limit."""
+
     pass
 
 
@@ -22,6 +28,7 @@ def safe_filename(name: str, fallback: str = "未命名") -> str:
 
 
 def clean_text(value: str, *, default: str = "", limit: int = 200) -> str:
+    """Strip control characters, trim text, and apply a fallback and length limit."""
     text = _CONTROL_CHARS.sub("", value or "").strip()
     return (text or default)[:limit]
 

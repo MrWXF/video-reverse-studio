@@ -32,22 +32,29 @@ TERMINAL_STATUSES = {"succeeded", "partial", "failed", "cancelled"}
 
 
 class GenerationPlanError(RuntimeError):
+    """The prompt plan cannot be used to create a generation job."""
+
     pass
 
 
 class GenerationSelectionError(ValueError):
+    """The requested shots, ratio, or provider capability are invalid."""
+
     pass
 
 
 def capabilities(settings: Settings) -> dict:
+    """Expose provider capabilities without leaking credentials."""
     return adapter_capabilities(settings)
 
 
 def _now() -> datetime:
+    """Return an aware UTC timestamp for persisted job fields."""
     return datetime.now(timezone.utc)
 
 
 def _load_plan(project: PromptProject) -> PromptPlan:
+    """Parse a completed prompt plan or raise a generation-specific error."""
     if project.status != "done" or not project.plan_json:
         raise GenerationPlanError("提示词方案尚未生成完成，暂不能生成视频")
     try:
@@ -57,6 +64,7 @@ def _load_plan(project: PromptProject) -> PromptPlan:
 
 
 def _selected_shots(plan: PromptPlan, requested: list[int]) -> list[PromptShot]:
+    """Select requested shots in stable order, or all shots when none are specified."""
     available = {shot.index: shot for shot in plan.shots}
     if not available:
         raise GenerationPlanError("提示词方案没有可生成的镜头")
@@ -77,6 +85,12 @@ def create_generation_job(
     payload: GenerationJobCreate,
     settings: Settings,
 ) -> tuple[GenerationJob, bool]:
+    """Create a durable generation job or reuse one matched by idempotency key.
+
+    Returns ``(job, reused)``. The boolean tells the caller whether a new
+    background worker must be started. Concurrent key collisions are resolved
+    by reloading the winning row after ``IntegrityError``.
+    """
     adapter = create_adapter(settings)
     plan = _load_plan(project)
     selected = _selected_shots(plan, payload.shot_indices)
@@ -132,6 +146,7 @@ def create_generation_job(
 
 
 def _job_directory(project_id: str, job_id: str, settings: Settings) -> Path:
+    """Return the resolved storage directory for one generation job."""
     return (settings.data_dir / "generations" / project_id / job_id).resolve()
 
 
@@ -143,6 +158,7 @@ def _store_output(
     data: bytes,
     settings: Settings,
 ) -> str:
+    """Atomically persist generated media and return its filename."""
     suffix = extension.lower().lstrip(".")
     if suffix not in {"mp4", "webm", "mov", "svg"}:
         raise GenerationSelectionError("生成结果格式不受支持")
@@ -162,6 +178,7 @@ def generation_media_path(
     filename: str,
     settings: Settings,
 ) -> Path | None:
+    """Resolve a generated file only when it stays inside the job's output root."""
     root = _job_directory(project_id, job_id, settings)
     path = (root / filename).resolve()
     if root not in path.parents or not path.is_file():
@@ -176,6 +193,7 @@ def _mark_failed(
     *,
     step: str = "failed",
 ) -> None:
+    """Move a job to a terminal failed state with a bounded error message."""
     job.status = "failed"
     job.step = step
     job.error = message[:1000]
@@ -350,6 +368,7 @@ def run_generation_job(job_id: str, request_id: str | None = None) -> None:
 
 
 def cancel_generation_job(db: Session, job: GenerationJob) -> GenerationJob:
+    """Cancel a queued or running job and persist its terminal state."""
     if job.status not in {"queued", "running"}:
         raise GenerationSelectionError("该生成任务当前不可取消")
     job.status = "cancelled"

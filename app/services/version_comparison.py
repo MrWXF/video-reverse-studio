@@ -65,6 +65,7 @@ ENTITY_FIELD_LABELS = {
 
 
 def _version_meta(version: PromptVersion) -> dict:
+    """Serialize the version metadata shown on both sides of a comparison."""
     plan = version.plan_json or {}
     return {
         "id": version.id,
@@ -82,6 +83,7 @@ def _top_level_changes(
     labels: dict[str, str],
     excluded: set[str] | None = None,
 ) -> list[dict]:
+    """Return changed top-level fields with labels and both values."""
     excluded = excluded or set()
     keys = sorted((set(left) | set(right)) - excluded)
     return [
@@ -97,6 +99,7 @@ def _top_level_changes(
 
 
 def _field_diffs(left: dict, right: dict) -> list[dict]:
+    """Return changed shot fields in the canonical comparison order."""
     return [
         {
             "field": field,
@@ -113,6 +116,7 @@ def build_version_comparison(
     left_version: PromptVersion,
     right_version: PromptVersion,
 ) -> dict:
+    """Compare two validated snapshots by plan, entity, and shot-level changes."""
     try:
         left_plan = PromptPlan.model_validate(left_version.plan_json or {})
         right_plan = PromptPlan.model_validate(right_version.plan_json or {})

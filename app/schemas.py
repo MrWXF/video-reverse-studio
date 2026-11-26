@@ -1,3 +1,5 @@
+"""Pydantic request, response, and persisted-domain schemas shared across layers."""
+
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -19,6 +21,8 @@ TemplateField = Literal[
 
 
 class ShotAnalysis(BaseModel):
+    """Normalized per-shot visual analysis stored on a ``Shot`` row."""
+
     shot_type: str = Field(default="中景", description="景别")
     camera_movement: str = Field(default="固定", description="运镜")
     subject: str = Field(default="", description="画面主体")
@@ -34,12 +38,16 @@ class ShotAnalysis(BaseModel):
 
 
 class TranscriptSegment(BaseModel):
+    """A speech-to-text segment with start and end offsets in seconds."""
+
     start: float
     end: float
     text: str
 
 
 class RecipeShot(BaseModel):
+    """A shot entry in the derived, exportable production recipe."""
+
     index: int
     start_s: float
     end_s: float
@@ -60,6 +68,8 @@ class RecipeShot(BaseModel):
 
 
 class Recipe(BaseModel):
+    """A complete reverse-engineering recipe derived from a finished analysis."""
+
     title: str
     source_filename: str
     duration: float
@@ -77,12 +87,16 @@ class Recipe(BaseModel):
 
 
 class ReferenceContext(BaseModel):
+    """The frozen reference recipe inherited by a prompt-generation project."""
+
     project_id: str
     mode: ReferenceMode = "style"
     recipe: Recipe
 
 
 class EntityItem(BaseModel):
+    """A reusable character, product, wardrobe item, or scene definition."""
+
     model_config = ConfigDict(str_strip_whitespace=True)
 
     name: str = Field(min_length=1, max_length=80)
@@ -92,6 +106,8 @@ class EntityItem(BaseModel):
 
 
 class EntityBible(BaseModel):
+    """Continuity definitions applied across all shots in a prompt plan."""
+
     characters: list[EntityItem] = Field(default_factory=list)
     products: list[EntityItem] = Field(default_factory=list)
     wardrobe: list[EntityItem] = Field(default_factory=list)
@@ -100,6 +116,8 @@ class EntityBible(BaseModel):
 
 
 class PromptBrief(BaseModel):
+    """User-provided generation brief and optional reverse-project reference."""
+
     model_config = ConfigDict(str_strip_whitespace=True)
 
     title: str = Field(default="", max_length=200)
@@ -120,6 +138,8 @@ class PromptBrief(BaseModel):
 
 
 class ShotAnalysisUpdate(BaseModel):
+    """Partial manual edits for one shot; omitted fields remain unchanged."""
+
     model_config = ConfigDict(str_strip_whitespace=True)
 
     shot_type: str | None = None
@@ -138,18 +158,26 @@ class ShotAnalysisUpdate(BaseModel):
 
 
 class TimelineBoundaryUpdate(BaseModel):
+    """Request body for moving the boundary after one shot, in seconds."""
+
     boundary_s: float = Field(gt=0)
 
 
 class TimelineSplitRequest(BaseModel):
+    """Request body for splitting one shot at an absolute timestamp in seconds."""
+
     split_at: float = Field(gt=0)
 
 
 class TimelineMergeRequest(BaseModel):
+    """Request body identifying exactly two shots to merge."""
+
     shot_ids: list[int] = Field(min_length=2, max_length=2)
 
 
 class ShotTemplateSave(BaseModel):
+    """Editable metadata used when saving a shot as a reusable template."""
+
     model_config = ConfigDict(str_strip_whitespace=True)
 
     name: str = Field(min_length=1, max_length=100)
@@ -160,6 +188,8 @@ class ShotTemplateSave(BaseModel):
 
 
 class ShotTemplateApply(BaseModel):
+    """Template and target-shot selection for a template application."""
+
     template_id: int = Field(ge=1)
     shot_indices: list[int] = Field(default_factory=list)
     fields: list[TemplateField] = Field(
@@ -174,6 +204,8 @@ class ShotTemplateApply(BaseModel):
 
 
 class PromptShot(BaseModel):
+    """One timed, editable shot in a generated prompt plan."""
+
     index: int = Field(default=1, ge=1)
     start_s: float = Field(default=0.0, ge=0.0)
     end_s: float = Field(default=0.0, ge=0.0)
@@ -194,6 +226,8 @@ class PromptShot(BaseModel):
 
 
 class PromptShotUpdate(BaseModel):
+    """Partial prompt-shot edits; omitted fields remain unchanged."""
+
     model_config = ConfigDict(str_strip_whitespace=True)
 
     shot_type: str | None = None
@@ -211,6 +245,8 @@ class PromptShotUpdate(BaseModel):
 
 
 class GenerationJobCreate(BaseModel):
+    """Selection and idempotency controls for creating a video-generation job."""
+
     model_config = ConfigDict(str_strip_whitespace=True)
 
     shot_indices: list[int] = Field(default_factory=list)
@@ -220,17 +256,23 @@ class GenerationJobCreate(BaseModel):
 
 
 class CostEstimateRequest(BaseModel):
+    """Inputs for pre-upload analysis cost estimation."""
+
     video_duration: float = Field(gt=0, le=10800)
     estimated_shots: int | None = Field(default=None, ge=1, le=1000)
 
 
 class ShareCreate(BaseModel):
+    """Share permission, optional expiry, and optional pinned version."""
+
     permission: Literal["read", "comment"] = "read"
     expires_in_days: int | None = Field(default=None, ge=1, le=365)
     version_id: str | None = None
 
 
 class CommentCreate(BaseModel):
+    """A comment submitted through a comment-enabled share token."""
+
     model_config = ConfigDict(str_strip_whitespace=True)
 
     author: str = Field(default="访客", max_length=80)
@@ -238,6 +280,8 @@ class CommentCreate(BaseModel):
 
 
 class PromptPlan(BaseModel):
+    """The complete, normalized output of prompt generation."""
+
     title: str = Field(default="")
     summary: str = Field(default="")
     target_model: str = Field(default="generic")

@@ -1,3 +1,5 @@
+"""Prompt-plan generation, normalization, persistence, and single-shot regeneration."""
+
 import hashlib
 import json
 import logging
@@ -50,6 +52,7 @@ def _update_project(
     progress: float | None = None,
     error: str | None = None,
 ) -> None:
+    """Update worker-visible project fields, clamp progress, and commit immediately."""
     if status is not None:
         project.status = status
     if step is not None:
@@ -94,6 +97,7 @@ def run_prompt_generation(project_id: str, request_id: str | None = None) -> Non
                 gateway = LLMGateway(settings)
 
                 def generate_attempt() -> tuple[PromptPlan, list[str]]:
+                    """Generate and normalize one candidate plan for a retry attempt."""
                     candidate, attempt_notes = generate_prompt_plan(
                         brief, gateway, reference
                     )
@@ -107,6 +111,7 @@ def run_prompt_generation(project_id: str, request_id: str | None = None) -> Non
                     return candidate, attempt_notes
 
                 def on_retry(attempt: int, exc: BaseException, delay: float) -> None:
+                    """Persist retry state so the UI can show transient failures."""
                     db.rollback()
                     logger.warning(
                         "retrying prompt generation project=%s attempt=%s delay=%.2fs",
@@ -164,6 +169,11 @@ def generate_prompt_plan(
     gateway: LLMGateway,
     reference: ReferenceContext | None = None,
 ) -> tuple[PromptPlan, list[str]]:
+    """Generate one candidate plan, falling back from structured output to JSON.
+
+    Disabled or unconfigured models return a deterministic mock plan. Retryable
+    provider failures are wrapped so the caller can apply bounded retries.
+    """
     if not gateway.enabled:
         return mock_prompt_plan(
             brief,
@@ -213,6 +223,7 @@ def generate_prompt_plan(
 
 
 def _brief_text(brief: PromptBrief, reference: ReferenceContext | None = None) -> str:
+    """Serialize the brief and reference-inheritance rules into model instructions."""
     payload = json.dumps(brief.model_dump(mode="json"), ensure_ascii=False, indent=2)
     text = (
         "请根据以下创意简报生成视频提示词方案。"
@@ -320,6 +331,7 @@ def _compose_prompt(
     brief: PromptBrief,
     global_style: str = "",
 ) -> str:
+    """Compose a baseline prompt when the model omitted or cleared the shot prompt."""
     subject = shot.subject or "the main subject"
     action = shot.action or "performs a clear, visually readable action"
     scene = shot.scene or "a clean cinematic environment"
@@ -345,6 +357,7 @@ def mock_prompt_plan(
     scenario: str = "success",
     catalog_path: str = "",
 ) -> PromptPlan:
+    """Build a deterministic catalog-based plan for demos, tests, and provider outages."""
     scenario = (scenario or "success").lower().strip()
     if scenario == "fail":
         raise MockScenarioError("Mock 已按配置模拟提示词生成失败")
@@ -429,6 +442,7 @@ def mock_prompt_plan(
 
 
 def _reference_style(reference: ReferenceContext | None) -> str:
+    """Return the first non-empty visual style captured from the reference recipe."""
     if reference is None:
         return ""
     return next(
@@ -438,10 +452,12 @@ def _reference_style(reference: ReferenceContext | None) -> str:
 
 
 def _clean_locked_fields(fields: list[str] | None) -> list[str]:
+    """Keep only supported lock fields and remove duplicates while preserving order."""
     return list(dict.fromkeys(field for field in (fields or []) if field in _LOCKABLE_FIELDS))
 
 
 def _entity_subject(brief: PromptBrief) -> str:
+    """Choose the first product or character as the continuity subject."""
     bible = brief.entity_bible
     for item in [*bible.products, *bible.characters]:
         detail = item.appearance or item.description
@@ -450,6 +466,7 @@ def _entity_subject(brief: PromptBrief) -> str:
 
 
 def _entity_scene(brief: PromptBrief) -> str:
+    """Choose the first continuity scene or a neutral cinematic environment."""
     bible = brief.entity_bible
     if bible.scenes:
         item = bible.scenes[0]
@@ -459,6 +476,7 @@ def _entity_scene(brief: PromptBrief) -> str:
 
 
 def _entity_context(brief: PromptBrief) -> str:
+    """Serialize the continuity bible for single-shot model prompts."""
     payload = brief.entity_bible.model_dump(mode="json")
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -468,6 +486,12 @@ def regenerate_prompt_shot(
     shot_index: int,
     settings: Settings,
 ) -> tuple[PromptPlan, dict]:
+    """Regenerate one shot and merge only unlocked fields into the existing timeline.
+
+    Timing, shot index, source mapping, and explicitly locked fields are always
+    preserved. The function returns the updated plan and current gateway usage
+    metrics; it does not persist the plan or create a version snapshot.
+    """
     brief = PromptBrief.model_validate(project.brief_json or {})
     plan = PromptPlan.model_validate(project.plan_json or {})
     reference = (
@@ -528,6 +552,7 @@ def _model_regenerate_shot(
     gateway: LLMGateway,
     reference: ReferenceContext | None,
 ) -> PromptShot | None:
+    """Ask the text model to rewrite one shot, returning ``None`` on any failure."""
     llm = gateway.chat_model()
     if llm is None:
         return None
@@ -566,6 +591,7 @@ def _local_regenerate_shot(
     locked: set[str],
     catalog_path: str = "",
 ) -> PromptShot:
+    """Build a replacement shot from local catalog vocabulary without a model call."""
     catalog = load_catalog(catalog_path)
     candidate = current.model_copy(deep=True)
     seed = int(

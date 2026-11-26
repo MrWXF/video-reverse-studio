@@ -1,3 +1,5 @@
+"""Speech-to-text provider integration used by full and targeted analysis pipelines."""
+
 import logging
 from pathlib import Path
 
@@ -9,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 def transcribe(audio_path: Path, settings: Settings) -> list[dict]:
+    """Dispatch to the configured ASR provider and return timed text segments."""
     provider = settings.asr_provider.lower().strip()
     if provider in ("", "none") or not audio_path.exists():
         return []
@@ -19,6 +22,7 @@ def transcribe(audio_path: Path, settings: Settings) -> list[dict]:
 
 
 def _transcribe_openai(audio_path: Path, settings: Settings) -> list[dict]:
+    """Call an OpenAI-compatible transcription endpoint, returning ``[]`` on failure."""
     api_key = settings.asr_api_key or settings.llm_api_key
     if not api_key:
         logger.warning("ASR skipped: missing api key")

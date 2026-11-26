@@ -1,3 +1,5 @@
+"""Remove credentials and local paths from user-visible error messages."""
+
 import re
 from pathlib import Path
 
@@ -51,4 +53,5 @@ def redact_exception(
     *,
     limit: int = 2000,
 ) -> str:
+    """Redact an exception message before exposing it through logs or the API."""
     return redact_text(exc, settings, limit=limit)

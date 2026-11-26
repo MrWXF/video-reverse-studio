@@ -14,6 +14,7 @@ from ..config import Settings
 
 
 def _as_int(value: Any) -> int:
+    """Coerce arbitrary metrics to a non-negative integer."""
     try:
         return max(0, int(value or 0))
     except (TypeError, ValueError):
@@ -25,6 +26,7 @@ def _priced_amount(
     completion_tokens: int,
     settings: Settings,
 ) -> float | None:
+    """Apply configured per-million-token prices, or return ``None`` when unpriced."""
     input_price = float(settings.llm_input_price_per_million or 0)
     output_price = float(settings.llm_output_price_per_million or 0)
     if input_price <= 0 and output_price <= 0:

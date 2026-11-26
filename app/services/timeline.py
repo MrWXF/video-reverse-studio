@@ -34,27 +34,39 @@ class TimelineError(Exception):
 
 
 class TimelineNotFoundError(TimelineError):
+    """The requested project or shot does not exist."""
+
     pass
 
 
 class TimelineConflictError(TimelineError):
+    """The project already has an active job or is otherwise busy."""
+
     pass
 
 
 class TimelineValidationError(TimelineError):
+    """The requested boundary, split, or merge is not structurally valid."""
+
     pass
 
 
 class TimelineCapacityError(TimelineError):
+    """Global worker capacity is exhausted."""
+
     pass
 
 
 class TimelineCancelled(Exception):
+    """Internal control-flow signal used when a user cancels the job."""
+
     pass
 
 
 @dataclass(frozen=True)
 class TimelineMutation:
+    """Describe the queued job and affected records for one timeline mutation."""
+
     job_id: str
     action: str
     affected_shot_ids: list[int]
@@ -62,6 +74,7 @@ class TimelineMutation:
 
 
 def _ordered_shots(db: Session, project_id: str) -> list[Shot]:
+    """Return all project shots in display order."""
     return list(
         db.scalars(
             select(Shot).where(Shot.project_id == project_id).order_by(Shot.index)
@@ -70,6 +83,7 @@ def _ordered_shots(db: Session, project_id: str) -> list[Shot]:
 
 
 def _ensure_idle(db: Session, project: Project, settings: Settings) -> None:
+    """Reject mutations while a project job is active or capacity is unavailable."""
     if project.status in {"queued", "running"}:
         raise TimelineConflictError("项目正在分析，暂时不能编辑时间轴")
     active = db.scalar(
@@ -90,6 +104,7 @@ def _queue_job(
     action: str,
     shot_ids: list[int],
 ) -> Job:
+    """Create a queued timeline job, mark the project queued, and flush the row."""
     job = Job(
         id=str(uuid.uuid4()),
         project_id=project.id,
@@ -111,6 +126,7 @@ def _audit(
     source: str,
     changes: dict,
 ) -> None:
+    """Record a per-shot audit event when there are actual field changes."""
     if not changes:
         return
     db.add(
@@ -129,6 +145,11 @@ def invalidate_prompt_mappings(
     project_id: str,
     warning: str = TIMELINE_MAPPING_WARNING,
 ) -> int:
+    """Append a mapping warning to linked prompt plans and return the affected count.
+
+    This helper mutates ORM objects but does not commit; the caller owns the
+    surrounding timeline transaction.
+    """
     projects = db.scalars(
         select(PromptProject).where(PromptProject.source_project_id == project_id)
     ).all()
@@ -153,6 +174,11 @@ def update_boundary(
     boundary_s: float,
     settings: Settings,
 ) -> TimelineMutation:
+    """Move the boundary after one shot while preserving both minimum durations.
+
+    The method writes a queued job and audit events, invalidates linked prompt
+    mappings, and commits the transaction before returning.
+    """
     _ensure_idle(db, project, settings)
     shots = _ordered_shots(db, project.id)
     position = next((index for index, shot in enumerate(shots) if shot.id == shot_id), None)
@@ -208,6 +234,7 @@ def split_shot(
     split_at: float,
     settings: Settings,
 ) -> TimelineMutation:
+    """Split a shot into two ordered shots and queue targeted re-analysis."""
     _ensure_idle(db, project, settings)
     shots = _ordered_shots(db, project.id)
     shot = next((item for item in shots if item.id == shot_id), None)
@@ -271,6 +298,7 @@ def merge_shots(
     shot_ids: list[int],
     settings: Settings,
 ) -> TimelineMutation:
+    """Merge two adjacent shots, reindex the remainder, and queue re-analysis."""
     _ensure_idle(db, project, settings)
     unique_ids = list(dict.fromkeys(int(item) for item in shot_ids))
     if len(unique_ids) != 2:
@@ -322,6 +350,7 @@ def queue_reanalysis(
     shot_id: int,
     settings: Settings,
 ) -> TimelineMutation:
+    """Queue keyframe and vision re-analysis for one existing shot."""
     _ensure_idle(db, project, settings)
     shot = db.scalar(
         select(Shot).where(Shot.id == shot_id, Shot.project_id == project.id)
@@ -336,6 +365,7 @@ def queue_reanalysis(
 
 
 def _check_cancelled(db: Session, job: Job) -> None:
+    """Refresh the job and abort execution when the user cancelled it."""
     db.refresh(job)
     if job.status == "cancelled":
         raise TimelineCancelled()
@@ -350,6 +380,7 @@ def _update_job(
     progress: float | None = None,
     error: str | None = None,
 ) -> None:
+    """Persist job status and clamp progress into the public 0..1 range."""
     if status is not None:
         job.status = status
     if step is not None:
@@ -370,6 +401,7 @@ def _align_transcripts(
     ffmpeg: str,
     settings: Settings,
 ) -> None:
+    """Best-effort transcribe the source and attach overlapping text to each shot."""
     if settings.asr_provider.lower().strip() in ("", "none"):
         return
     root = project_dir(project.id, settings)
@@ -394,6 +426,11 @@ def _execute_timeline(
     shot_ids: list[int],
     settings: Settings,
 ) -> None:
+    """Re-probe, transcribe, extract frames, analyze selected shots, and rebuild the recipe.
+
+    Progress and partial results are committed incrementally so the UI can
+    observe the job. Cancellation is checked between expensive media steps.
+    """
     source = Path(project.source_path)
     if not source.is_file():
         raise RuntimeError("源视频文件不存在")

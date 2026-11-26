@@ -1,3 +1,5 @@
+"""SQLAlchemy persistence models for analysis, prompt, review, and generation data."""
+
 from datetime import datetime, timezone
 
 from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
@@ -7,10 +9,13 @@ from .db import Base
 
 
 def utcnow() -> datetime:
+    """Return the timezone-aware UTC timestamp used by persisted rows."""
     return datetime.now(timezone.utc)
 
 
 class Project(Base):
+    """A source video and its owned analysis, job, and audit records."""
+
     __tablename__ = "projects"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -42,6 +47,8 @@ class Project(Base):
 
 
 class Shot(Base):
+    """One ordered, contiguous interval of an analyzed source video."""
+
     __tablename__ = "shots"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -61,6 +68,8 @@ class Shot(Base):
 
 
 class Job(Base):
+    """A durable full-analysis or targeted timeline re-analysis job."""
+
     __tablename__ = "jobs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -81,6 +90,8 @@ class Job(Base):
 
 
 class PromptProject(Base):
+    """Prompt-generation inputs, reference snapshot, output plan, and lifecycle state."""
+
     __tablename__ = "prompt_projects"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -123,6 +134,8 @@ class PromptProject(Base):
 
 
 class PromptVersion(Base):
+    """An immutable snapshot of a prompt project's brief, bible, and plan."""
+
     __tablename__ = "prompt_versions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -141,6 +154,8 @@ class PromptVersion(Base):
 
 
 class DeliveryReview(Base):
+    """A delivered-video upload evaluated against the current prompt plan."""
+
     __tablename__ = "delivery_reviews"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -163,6 +178,8 @@ class DeliveryReview(Base):
 
 
 class PromptShare(Base):
+    """A tokenized, optionally expiring read or comment share link."""
+
     __tablename__ = "prompt_shares"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -190,6 +207,8 @@ class PromptShare(Base):
 
 
 class PromptComment(Base):
+    """A comment attached to one active share token."""
+
     __tablename__ = "prompt_comments"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)

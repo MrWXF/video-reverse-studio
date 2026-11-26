@@ -1,3 +1,5 @@
+"""Request-scoped logging context, structured JSON logs, and request-id middleware."""
+
 import json
 import logging
 import time
@@ -12,17 +14,24 @@ request_id_ctx: ContextVar[str] = ContextVar("request_id", default="")
 
 
 def current_request_id() -> str:
+    """Return the request id bound to the current execution context."""
     return request_id_ctx.get()
 
 
 class RequestIdFilter(logging.Filter):
+    """Attach the current request id to every log record."""
+
     def filter(self, record: logging.LogRecord) -> bool:
+        """Attach the active request id to the log record."""
         record.request_id = current_request_id() or "-"
         return True
 
 
 class JsonFormatter(logging.Formatter):
+    """Emit structured, redacted JSON log lines for application and access logs."""
+
     def format(self, record: logging.LogRecord) -> str:
+        """Render one redacted JSON log record."""
         payload = {
             "time": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
             "level": record.levelname,
@@ -38,6 +47,7 @@ class JsonFormatter(logging.Formatter):
 
 
 def configure_logging() -> None:
+    """Install the JSON stream handler as the single root log handler."""
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
     handler.addFilter(RequestIdFilter())
@@ -48,6 +58,7 @@ def configure_logging() -> None:
 
 
 def _clean_request_id(value: str | None) -> str:
+    """Sanitize a caller-supplied request id or generate a new one."""
     if not value:
         return uuid.uuid4().hex
     cleaned = "".join(char for char in value if char.isalnum() or char in "-_.")[:64]
@@ -58,9 +69,11 @@ class RequestContextMiddleware:
     """Attach request tracing, API version aliasing and cache headers."""
 
     def __init__(self, app: ASGIApp):
+        """Store the wrapped ASGI application."""
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Bind request tracing, rewrite versioned API paths, and log durations."""
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
@@ -82,6 +95,7 @@ class RequestContextMiddleware:
         logger = logging.getLogger("app.request")
 
         async def send_with_headers(message: Message) -> None:
+            """Attach tracing/security headers and static-file cache policy."""
             if message["type"] == "http.response.start":
                 response_headers = list(message.get("headers", []))
                 response_headers.append((b"x-request-id", request_id.encode("latin-1")))

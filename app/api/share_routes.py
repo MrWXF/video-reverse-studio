@@ -1,3 +1,5 @@
+"""Public, token-scoped endpoints for read-only and comment-enabled prompt shares."""
+
 import uuid
 from datetime import datetime, timezone
 
@@ -18,12 +20,14 @@ templates = Jinja2Templates(directory=str(PROJECT_ROOT / "app" / "templates"))
 
 
 def _utc(value: datetime | None) -> datetime | None:
+    """Treat naive persisted datetimes as UTC for expiry comparisons."""
     if value is None:
         return None
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 def get_active_share(db: Session, token: str) -> PromptShare:
+    """Load a share token and reject revoked or expired links."""
     share = db.scalar(select(PromptShare).where(PromptShare.token == token))
     if share is None or share.revoked_at is not None:
         raise HTTPException(status_code=404, detail="分享链接不存在或已失效")
@@ -34,6 +38,7 @@ def get_active_share(db: Session, token: str) -> PromptShare:
 
 
 def _shared_project_payload(share: PromptShare, db: Session) -> dict:
+    """Build a read-only payload, preferring the pinned version when one exists."""
     payload = prompt_project_payload(share.project, include_plan=True)
     version = db.get(PromptVersion, share.version_id) if share.version_id else None
     if version is not None and version.prompt_project_id == share.prompt_project_id:
@@ -55,6 +60,7 @@ def _shared_project_payload(share: PromptShare, db: Session) -> dict:
 
 @router.get("/share/{token}", response_class=HTMLResponse)
 def share_page(token: str, request: Request, db: Session = Depends(get_db)):
+    """Render the standalone share shell for a live token."""
     share = get_active_share(db, token)
     return templates.TemplateResponse(
         request,
@@ -70,12 +76,14 @@ def share_page(token: str, request: Request, db: Session = Depends(get_db)):
 
 @router.get("/api/shares/{token}")
 def get_shared_prompt(token: str, db: Session = Depends(get_db)) -> dict:
+    """Return the read-only project view exposed by a share token."""
     share = get_active_share(db, token)
     return _shared_project_payload(share, db)
 
 
 @router.get("/api/shares/{token}/comments")
 def list_shared_comments(token: str, db: Session = Depends(get_db)) -> list[dict]:
+    """List comments attached to a live share in chronological order."""
     share = get_active_share(db, token)
     comments = db.scalars(
         select(PromptComment)
@@ -91,6 +99,7 @@ def create_shared_comment(
     comment: CommentCreate,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Add a comment when the share token grants comment permission."""
     share = get_active_share(db, token)
     if share.permission != "comment":
         raise HTTPException(status_code=403, detail="该分享链接仅支持只读浏览")

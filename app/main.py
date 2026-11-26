@@ -1,3 +1,5 @@
+"""FastAPI application assembly, middleware, lifespan hooks, and HTML entry points."""
+
 import logging
 from contextlib import asynccontextmanager
 from copy import deepcopy
@@ -33,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    """Initialize storage and fail jobs that were interrupted by a restart."""
     init_db()
     with SessionLocal() as db:
         stale = db.scalars(
@@ -136,6 +139,7 @@ app.openapi = custom_openapi
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Return a redacted 500 response while retaining full details in server logs."""
     logger.exception("unhandled request error path=%s", request.url.path)
     return JSONResponse(
         status_code=500,
@@ -149,6 +153,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
+    """Render the main workspace shell with the active provider label."""
     mode = (
         "Mock"
         if settings.llm_provider.lower() == "mock" or not settings.llm_api_key

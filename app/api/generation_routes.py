@@ -20,6 +20,7 @@ router = APIRouter()
 
 
 def _get_project(db: Session, project_id: str) -> PromptProject:
+    """Load a prompt project or raise a 404 for generation endpoints."""
     project = db.get(PromptProject, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="提示词项目不存在")
@@ -27,6 +28,7 @@ def _get_project(db: Session, project_id: str) -> PromptProject:
 
 
 def _get_job(db: Session, job_id: str) -> GenerationJob:
+    """Load a generation job or raise a 404."""
     job = db.get(GenerationJob, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="视频生成任务不存在")
@@ -35,6 +37,7 @@ def _get_job(db: Session, job_id: str) -> GenerationJob:
 
 @router.get("/api/generation/capabilities")
 def generation_capabilities() -> dict:
+    """Return the active provider, supported ratios, and generation limits."""
     return generation.capabilities(get_settings())
 
 
@@ -54,6 +57,12 @@ def start_generation(
     background: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Create or reuse a generation job and queue it for execution.
+
+    Idempotency keys make retries safe. Invalid plans, shots, or providers are
+    mapped to 409, 422, and 503 respectively; reused jobs do not enqueue a
+    second worker.
+    """
     settings = get_settings()
     project = _get_project(db, project_id)
     if not capacity.has_capacity(settings.max_active_generation_jobs):
@@ -79,6 +88,7 @@ def start_generation(
 
 @router.get("/api/prompt-projects/{project_id}/generation-jobs")
 def list_generation_jobs(project_id: str, db: Session = Depends(get_db)) -> list[dict]:
+    """List up to 50 generation jobs for a prompt project, newest-first."""
     _get_project(db, project_id)
     jobs = db.scalars(
         select(GenerationJob)
@@ -91,11 +101,13 @@ def list_generation_jobs(project_id: str, db: Session = Depends(get_db)) -> list
 
 @router.get("/api/generation-jobs/{job_id}")
 def get_generation_job(job_id: str, db: Session = Depends(get_db)) -> dict:
+    """Return one generation job with per-shot results and progress."""
     return generation_job_payload(_get_job(db, job_id))
 
 
 @router.post("/api/generation-jobs/{job_id}/cancel")
 def cancel_generation_job(job_id: str, db: Session = Depends(get_db)) -> dict:
+    """Cancel a queued or running generation job and return its final state."""
     job = _get_job(db, job_id)
     try:
         job = generation.cancel_generation_job(db, job)
@@ -110,6 +122,7 @@ def download_generated_shot(
     shot_index: int,
     db: Session = Depends(get_db),
 ):
+    """Stream a successfully generated shot video from the managed output directory."""
     job = _get_job(db, job_id)
     shot = next(
         (

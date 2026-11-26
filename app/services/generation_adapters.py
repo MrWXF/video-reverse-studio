@@ -31,6 +31,8 @@ class GenerationInputError(ValueError):
 
 @dataclass(frozen=True)
 class VideoGenerationRequest:
+    """Provider-neutral request for generating one shot."""
+
     shot_index: int
     title: str
     prompt: str
@@ -42,6 +44,8 @@ class VideoGenerationRequest:
 
 @dataclass
 class GeneratedVideo:
+    """Generated media bytes and metadata ready for local persistence."""
+
     data: bytes
     extension: str
     media_type: str
@@ -51,10 +55,13 @@ class GeneratedVideo:
 
 
 class VideoGenerationAdapter(ABC):
+    """Interface implemented by local mock and future remote video providers."""
+
     name = "base"
     label = "Base"
 
     def __init__(self, settings: Settings) -> None:
+        """Store deployment settings used by provider implementations."""
         self.settings = settings
 
     @abstractmethod
@@ -73,6 +80,7 @@ class MockVideoGenerationAdapter(VideoGenerationAdapter):
     label = "Mock 本地演示"
 
     def generate(self, request: VideoGenerationRequest) -> GeneratedVideo:
+        """Render a local MP4 placeholder, falling back to a static SVG on failure."""
         if not request.prompt.strip():
             raise GenerationInputError(f"镜头 {request.shot_index} 没有可用的 Prompt")
         warnings = ["Mock 模式：生成的是本地占位素材，不代表真实视频模型效果。"]
@@ -99,6 +107,7 @@ class MockVideoGenerationAdapter(VideoGenerationAdapter):
         )
 
     def _render_mp4(self, ffmpeg: str, request: VideoGenerationRequest) -> bytes:
+        """Render a short synthetic MP4 test pattern with ffmpeg."""
         width, height = {
             "9:16": (360, 640),
             "16:9": (640, 360),
@@ -142,6 +151,7 @@ class MockVideoGenerationAdapter(VideoGenerationAdapter):
             return output.read_bytes()
 
     def _render_svg(self, request: VideoGenerationRequest) -> bytes:
+        """Render an escaped SVG placeholder when ffmpeg is unavailable."""
         title = html.escape((request.title or "Mock Video")[:60])
         prompt = html.escape((request.prompt or "")[:140])
         shot = html.escape(f"SHOT {request.shot_index:02d}")
@@ -157,6 +167,7 @@ class MockVideoGenerationAdapter(VideoGenerationAdapter):
 
 
 def create_adapter(settings: Settings) -> VideoGenerationAdapter:
+    """Create the configured provider adapter or fail with a capability error."""
     provider = (settings.video_provider or "mock").strip().lower()
     if provider == "mock":
         return MockVideoGenerationAdapter(settings)
@@ -166,6 +177,7 @@ def create_adapter(settings: Settings) -> VideoGenerationAdapter:
 
 
 def capabilities(settings: Settings) -> dict:
+    """Describe provider readiness and supported generation limits without secrets."""
     provider = (settings.video_provider or "mock").strip().lower()
     mock = provider == "mock"
     return {

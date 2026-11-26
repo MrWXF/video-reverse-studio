@@ -29,6 +29,7 @@ PLACEHOLDER_RE = re.compile(r"{{\s*([A-Za-z0-9_.-]+)\s*}}")
 
 
 def _clean_tags(values: list[str]) -> list[str]:
+    """Trim, deduplicate, and cap template tags."""
     tags: list[str] = []
     for value in values:
         tag = str(value or "").strip()[:50]
@@ -38,14 +39,17 @@ def _clean_tags(values: list[str]) -> list[str]:
 
 
 def normalize_tags(values: list[str] | None) -> list[str]:
+    """Normalize public tag input using the same rules as persisted templates."""
     return _clean_tags(values or [])
 
 
 def placeholders_in(value: str | None) -> list[str]:
+    """Return the sorted set of ``{{placeholder}}`` names used by a string."""
     return sorted(set(PLACEHOLDER_RE.findall(value or "")))
 
 
 def _context_text(value) -> str:
+    """Flatten a template-context value into display text."""
     if value is None:
         return ""
     if isinstance(value, list):
@@ -56,6 +60,7 @@ def _context_text(value) -> str:
 
 
 def _shot_context(plan: PromptPlan, shot) -> dict:
+    """Build the placeholder context for one prompt shot."""
     context = {
         "title": plan.title,
         "summary": plan.summary,
@@ -73,10 +78,12 @@ def _shot_context(plan: PromptPlan, shot) -> dict:
 
 
 def _render_placeholders(value: str, context: dict, warnings: list[str]) -> str:
+    """Replace known placeholders and report unknown or empty values."""
     unknown: list[str] = []
     empty: list[str] = []
 
     def replace(match: re.Match) -> str:
+        """Resolve one placeholder occurrence."""
         key = match.group(1)
         if key not in context:
             unknown.append(key)
@@ -98,6 +105,7 @@ def template_from_shot(
     shot: Shot,
     payload: ShotTemplateSave,
 ) -> ShotTemplate:
+    """Create a reusable template from a shot analysis and user metadata."""
     analysis = shot.analysis or {}
     return ShotTemplate(
         name=payload.name,
@@ -168,6 +176,7 @@ def apply_template(
 
 
 def template_payload(template: ShotTemplate) -> dict:
+    """Serialize a template and expose detected placeholder names."""
     placeholders = placeholders_in(
         " ".join(str(getattr(template, field) or "") for field in TEXT_FIELDS)
     )

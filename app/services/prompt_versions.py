@@ -1,3 +1,5 @@
+"""Create immutable prompt-plan snapshots and serialize version metadata."""
+
 import copy
 import uuid
 from datetime import datetime, timezone
@@ -13,6 +15,7 @@ def create_prompt_version(
     project: PromptProject,
     source: str,
 ) -> PromptVersion:
+    """Add the next immutable version snapshot without committing the transaction."""
     latest = db.scalar(
         select(func.max(PromptVersion.version)).where(
             PromptVersion.prompt_project_id == project.id
@@ -34,6 +37,7 @@ def create_prompt_version(
 
 
 def version_payload(version: PromptVersion, include_plan: bool = False) -> dict:
+    """Serialize version metadata and optionally its full snapshots."""
     plan = version.plan_json or {}
     payload = {
         "id": version.id,

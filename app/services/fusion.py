@@ -1,3 +1,5 @@
+"""Merge shot analyses, transcripts, and timing metadata into a reusable recipe."""
+
 from collections import Counter
 from datetime import datetime, timezone
 
@@ -6,6 +8,7 @@ from .media import VideoMeta
 
 
 def attach_transcript(segments: list[dict], start: float, end: float) -> str:
+    """Join transcript segments overlapping a shot interval."""
     if not segments:
         return ""
     if end <= start:
@@ -20,6 +23,7 @@ def attach_transcript(segments: list[dict], start: float, end: float) -> str:
 
 
 def _pacing(cuts_per_minute: float) -> str:
+    """Classify cut density into slow, medium, or fast pacing."""
     if cuts_per_minute >= 30:
         return "fast"
     if cuts_per_minute >= 12:
@@ -28,6 +32,7 @@ def _pacing(cuts_per_minute: float) -> str:
 
 
 def _summary(shots: list[RecipeShot], duration: float, pacing: str) -> str:
+    """Build the human-readable recipe summary from shot and origin counts."""
     if not shots:
         return "未识别到有效镜头。"
     origins = Counter(shot.origin for shot in shots)
@@ -49,6 +54,7 @@ def build_recipe(
     shot_rows: list[dict],
     generated_at: datetime | None = None,
 ) -> Recipe:
+    """Assemble the exportable recipe and pacing statistics from analyzed shots."""
     shots: list[RecipeShot] = []
     for row in shot_rows:
         analysis: ShotAnalysis = row["analysis"]

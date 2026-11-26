@@ -1,3 +1,5 @@
+"""HTTP endpoints for prompt projects, versions, reviews, exports, and shares."""
+
 import copy
 import json
 import secrets
@@ -50,6 +52,7 @@ REVIEW_SUFFIXES = uploads.VIDEO_SUFFIXES
 
 
 def _get_project(db: Session, project_id: str) -> PromptProject:
+    """Load a prompt project or raise a 404 for the API caller."""
     project = db.get(PromptProject, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="提示词项目不存在")
@@ -57,6 +60,7 @@ def _get_project(db: Session, project_id: str) -> PromptProject:
 
 
 def _get_done_plan(project: PromptProject) -> PromptPlan:
+    """Parse the completed plan or raise a conflict when it is unavailable or corrupt."""
     if project.status != "done" or not project.plan_json:
         raise HTTPException(status_code=409, detail="提示词方案尚未生成完成")
     try:
@@ -84,6 +88,7 @@ def create_prompt_project(
     background: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Snapshot the brief and optional reference, then queue prompt generation."""
     settings = get_settings()
     if not capacity.has_capacity(settings.max_active_jobs):
         raise HTTPException(status_code=503, detail="当前生成任务已达并发上限，请稍后重试")
@@ -128,6 +133,7 @@ def update_prompt_shot(
     update: PromptShotUpdate,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Patch one prompt shot, preserve locked fields, and create a version snapshot."""
     project = _get_project(db, project_id)
     plan = _get_done_plan(project)
     shot = next((item for item in plan.shots if item.index == shot_index), None)
@@ -152,6 +158,7 @@ def regenerate_prompt_shot(
     shot_index: int,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Regenerate one shot synchronously while preserving timing and locked fields."""
     project = _get_project(db, project_id)
     _get_done_plan(project)
     try:
@@ -169,6 +176,7 @@ def regenerate_prompt_shot(
 
 @router.get("/api/prompt-projects/{project_id}/versions")
 def list_prompt_versions(project_id: str, db: Session = Depends(get_db)) -> list[dict]:
+    """List immutable prompt-plan snapshots newest-first."""
     _get_project(db, project_id)
     versions = db.scalars(
         select(PromptVersion)
@@ -189,6 +197,7 @@ def compare_prompt_versions(
     right_id: str,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Compare two snapshots from the same project by shot and field changes."""
     _get_project(db, project_id)
     if left_id == right_id:
         raise HTTPException(status_code=400, detail="请选择两个不同的版本进行对比")
@@ -217,6 +226,7 @@ def get_prompt_version(
     version_id: str,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Return one version with its full plan and brief snapshot."""
     version = db.get(PromptVersion, version_id)
     if version is None or version.prompt_project_id != project_id:
         raise HTTPException(status_code=404, detail="版本不存在")
@@ -229,6 +239,7 @@ def restore_prompt_version(
     version_id: str,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Validate and restore a snapshot, then record the restore as a new version."""
     project = _get_project(db, project_id)
     version = db.get(PromptVersion, version_id)
     if version is None or version.prompt_project_id != project_id:
@@ -254,6 +265,7 @@ def restore_prompt_version(
 
 @router.get("/api/prompt-projects/{project_id}/entity-bible")
 def get_entity_bible(project_id: str, db: Session = Depends(get_db)) -> dict:
+    """Return the continuity bible used for subject, scene, and product consistency."""
     project = _get_project(db, project_id)
     return {"entity_bible": project.entity_bible_json or {}}
 
@@ -264,6 +276,11 @@ def update_entity_bible(
     bible: EntityBible,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Update the continuity bible and mirror it into the source brief.
+
+    When a completed plan already exists, the edit creates a version snapshot
+    before commit so the previous plan can be restored.
+    """
     project = _get_project(db, project_id)
     data = bible.model_dump(mode="json")
     project.entity_bible_json = data
@@ -278,6 +295,7 @@ def update_entity_bible(
 
 @router.get("/api/prompt-projects/{project_id}/comparison")
 def get_prompt_comparison(project_id: str, db: Session = Depends(get_db)) -> dict:
+    """Compare the completed plan with the reference video captured at creation."""
     project = _get_project(db, project_id)
     plan = _get_done_plan(project)
     if not project.reference_snapshot_json:
@@ -291,6 +309,7 @@ def get_prompt_comparison(project_id: str, db: Session = Depends(get_db)) -> dic
 
 @router.get("/api/prompt-projects")
 def list_prompt_projects(db: Session = Depends(get_db)) -> list[dict]:
+    """List prompt projects newest-first without embedding full plans."""
     projects = db.scalars(
         select(PromptProject).order_by(PromptProject.created_at.desc())
     ).all()
@@ -299,6 +318,7 @@ def list_prompt_projects(db: Session = Depends(get_db)) -> list[dict]:
 
 @router.get("/api/prompt-projects/{project_id}")
 def get_prompt_project(project_id: str, db: Session = Depends(get_db)) -> dict:
+    """Return one prompt project with its plan and current status."""
     return prompt_project_payload(_get_project(db, project_id), include_plan=True)
 
 
@@ -309,6 +329,11 @@ def regenerate_prompt_project(
     background: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Clear the current plan and queue a full prompt regeneration.
+
+    The endpoint rejects active projects and returns 503 when shared capacity
+    is exhausted. The queued state is committed before the task is started.
+    """
     settings = get_settings()
     if not capacity.has_capacity(settings.max_active_jobs):
         raise HTTPException(status_code=503, detail="当前生成任务已达并发上限，请稍后重试")
@@ -332,6 +357,7 @@ def regenerate_prompt_project(
 
 @router.post("/api/prompt-projects/{project_id}/cancel", status_code=202)
 def cancel_prompt_project(project_id: str, db: Session = Depends(get_db)) -> dict:
+    """Cancel a queued or running prompt-generation project."""
     project = _get_project(db, project_id)
     if project.status not in {"queued", "running"}:
         raise HTTPException(status_code=409, detail="该任务当前不可取消")
@@ -349,6 +375,7 @@ def prompt_project_events(
     request: Request,
     db: Session = Depends(get_db),
 ):
+    """Stream prompt-project status changes as server-sent events."""
     _get_project(db, project_id)
     return StreamingResponse(
         sse.prompt_event_stream(request, project_id),
@@ -363,6 +390,7 @@ def prompt_project_events(
 
 @router.get("/api/model-profiles")
 def list_model_profiles() -> list[dict]:
+    """Return the target video-model profiles and their prompt constraints."""
     return model_profiles.model_profile_options()
 
 
@@ -384,6 +412,7 @@ def create_delivery_review(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> dict:
+    """Validate a delivered video, persist it, and queue structural review."""
     settings = get_settings()
     if not capacity.has_capacity(settings.max_active_jobs):
         raise HTTPException(status_code=503, detail="当前任务已达并发上限，请稍后重试")
@@ -436,6 +465,7 @@ def list_delivery_reviews(
     project_id: str,
     db: Session = Depends(get_db),
 ) -> list[dict]:
+    """List delivery reviews for a prompt project newest-first."""
     _get_project(db, project_id)
     reviews = db.scalars(
         select(DeliveryReview)
@@ -451,6 +481,7 @@ def get_delivery_review(
     review_id: str,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Return one delivery review including its computed comparison result."""
     review = db.get(DeliveryReview, review_id)
     if review is None or review.prompt_project_id != project_id:
         raise HTTPException(status_code=404, detail="回测记录不存在")
@@ -463,6 +494,7 @@ def delete_delivery_review(
     review_id: str,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Delete a delivery review record and its managed upload directory."""
     review = db.get(DeliveryReview, review_id)
     if review is None or review.prompt_project_id != project_id:
         raise HTTPException(status_code=404, detail="回测记录不存在")
@@ -477,6 +509,7 @@ def delete_delivery_review(
 
 @router.get("/api/prompt-projects/{project_id}/export/zip")
 def export_prompt_zip(project_id: str, db: Session = Depends(get_db)) -> Response:
+    """Package the plan, version history, and available reference assets as a ZIP."""
     project = _get_project(db, project_id)
     plan = _get_done_plan(project)
     versions = db.scalars(
@@ -512,6 +545,7 @@ def create_prompt_share(
     payload: ShareCreate,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Create a tokenized share for the current or a specific immutable version."""
     project = _get_project(db, project_id)
     _get_done_plan(project)
     version_number = None
@@ -538,6 +572,7 @@ def create_prompt_share(
 
 @router.get("/api/prompt-projects/{project_id}/shares")
 def list_prompt_shares(project_id: str, db: Session = Depends(get_db)) -> list[dict]:
+    """List share links with their permission, expiry, and optional version number."""
     _get_project(db, project_id)
     shares = db.scalars(
         select(PromptShare)
@@ -567,6 +602,7 @@ def prompt_share_qr(
     request: Request,
     db: Session = Depends(get_db),
 ) -> Response:
+    """Render an SVG QR code for a live share URL without a third-party service."""
     _get_project(db, project_id)
     share = db.get(PromptShare, share_id)
     if share is None or share.prompt_project_id != project_id:
@@ -599,6 +635,7 @@ def revoke_prompt_share(
     share_id: str,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Revoke a share link without deleting its historical record."""
     share = db.get(PromptShare, share_id)
     if share is None or share.prompt_project_id != project_id:
         raise HTTPException(status_code=404, detail="分享链接不存在")
@@ -613,6 +650,7 @@ def export_prompt_project(
     format: str = "md",
     db: Session = Depends(get_db),
 ):
+    """Download a completed prompt plan as Markdown or JSON."""
     project = _get_project(db, project_id)
     if project.status != "done" or not project.plan_json:
         raise HTTPException(status_code=404, detail="提示词方案尚未生成")
@@ -634,6 +672,7 @@ def export_prompt_project(
 
 @router.delete("/api/prompt-projects/{project_id}")
 def delete_prompt_project(project_id: str, db: Session = Depends(get_db)) -> dict:
+    """Delete a prompt project and its dependent versions, reviews, shares, and comments."""
     project = _get_project(db, project_id)
     db.delete(project)
     db.commit()

@@ -1,3 +1,5 @@
+"""ffmpeg/ffprobe helpers for probing, segmentation, keyframes, and audio extraction."""
+
 import json
 import logging
 import re
@@ -13,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class VideoMeta:
+    """Basic video metadata required by segmentation and prompt analysis."""
+
     duration: float = 0.0
     width: int = 0
     height: int = 0
@@ -20,6 +24,7 @@ class VideoMeta:
 
 
 def _run(cmd: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
+    """Run a media command with decoded output and a hard timeout."""
     return subprocess.run(
         cmd,
         capture_output=True,
@@ -31,6 +36,7 @@ def _run(cmd: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
 
 
 def resolve_ffmpeg(configured: str = "ffmpeg") -> str | None:
+    """Resolve ffmpeg from PATH or the bundled imageio-ffmpeg package."""
     found = shutil.which(configured)
     if found:
         return found
@@ -43,6 +49,7 @@ def resolve_ffmpeg(configured: str = "ffmpeg") -> str | None:
 
 
 def resolve_ffprobe(configured: str = "ffprobe") -> str | None:
+    """Resolve ffprobe from PATH or beside the resolved ffmpeg executable."""
     found = shutil.which(configured)
     if found:
         return found
@@ -55,6 +62,7 @@ def resolve_ffprobe(configured: str = "ffprobe") -> str | None:
 
 
 def _parse_rate(value: str | None) -> float:
+    """Parse ffprobe's fractional or decimal frame-rate notation."""
     if not value:
         return 0.0
     if "/" in value:
@@ -70,6 +78,7 @@ def _parse_rate(value: str | None) -> float:
 
 
 def probe(path: Path, settings: Settings) -> VideoMeta:
+    """Read duration, dimensions, and FPS, falling back to ffmpeg stderr parsing."""
     ffprobe = resolve_ffprobe(settings.ffprobe_bin)
     if ffprobe:
         cmd = [
@@ -125,6 +134,7 @@ def probe(path: Path, settings: Settings) -> VideoMeta:
 def merge_short_shots(
     boundaries: list[float], min_seconds: float
 ) -> list[tuple[float, float]]:
+    """Remove interior cut points that would create shots below the minimum duration."""
     points = sorted({round(point, 3) for point in boundaries})
     if len(points) < 2:
         return []
@@ -141,6 +151,7 @@ def merge_short_shots(
 def cap_shots(
     segments: list[tuple[float, float]], max_shots: int
 ) -> list[tuple[float, float]]:
+    """Evenly resplit a timeline when scene detection exceeds the shot limit."""
     if not segments or len(segments) <= max_shots:
         return segments
     start = segments[0][0]
@@ -152,6 +163,7 @@ def cap_shots(
 def fallback_segments(
     duration: float, max_shots: int, target_seconds: float = 6.0
 ) -> list[tuple[float, float]]:
+    """Create evenly spaced fallback segments when scene detection cannot run."""
     if duration <= 0:
         return [(0.0, target_seconds)]
     count = max(1, min(max_shots, round(duration / target_seconds) or 1))
@@ -160,6 +172,7 @@ def fallback_segments(
 
 
 def detect_shots(path: Path, meta: VideoMeta, settings: Settings) -> list[tuple[float, float]]:
+    """Detect scene cuts with ffmpeg and normalize them into valid shot intervals."""
     ffmpeg = resolve_ffmpeg(settings.ffmpeg_bin)
     cuts: list[float] = []
     if ffmpeg and meta.duration > 0:
@@ -198,6 +211,7 @@ def detect_shots(path: Path, meta: VideoMeta, settings: Settings) -> list[tuple[
 
 
 def extract_keyframe(ffmpeg: str, video: Path, timestamp: float, output: Path) -> None:
+    """Extract and downscale one JPEG keyframe, raising when ffmpeg produces no file."""
     output.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         ffmpeg,
@@ -223,6 +237,7 @@ def extract_keyframe(ffmpeg: str, video: Path, timestamp: float, output: Path) -
 
 
 def extract_audio(ffmpeg: str, video: Path, output: Path) -> None:
+    """Extract mono 16 kHz PCM audio for speech-to-text providers."""
     output.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         ffmpeg,

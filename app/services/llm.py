@@ -1,3 +1,5 @@
+"""Configured text-model gateway with usage accounting and optional mock fallback."""
+
 import threading
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -7,7 +9,10 @@ from ..config import Settings
 
 
 class LLMGateway:
+    """Create configured chat models and accumulate per-request token usage."""
+
     def __init__(self, settings: Settings):
+        """Store settings and initialize thread-safe usage counters."""
         self.settings = settings
         self._lock = threading.Lock()
         self.calls = 0
@@ -16,9 +21,11 @@ class LLMGateway:
 
     @property
     def enabled(self) -> bool:
+        """Return whether a non-mock provider and API key are configured."""
         return self.settings.llm_provider.lower() != "mock" and bool(self.settings.llm_api_key)
 
     def chat_model(self, vision: bool = False) -> BaseChatModel | None:
+        """Create a zero-temperature chat model for text or vision analysis."""
         if not self.enabled:
             return None
         model = self.settings.llm_model
@@ -36,6 +43,7 @@ class LLMGateway:
         return ChatOpenAI(**kwargs)
 
     def record_usage(self, message) -> None:
+        """Accumulate token usage from one provider response."""
         usage = getattr(message, "usage_metadata", None) or {}
         with self._lock:
             self.calls += 1
@@ -43,6 +51,7 @@ class LLMGateway:
             self.completion_tokens += int(usage.get("output_tokens") or 0)
 
     def stats(self) -> dict:
+        """Return a consistent snapshot of call and token counters."""
         with self._lock:
             return {
                 "calls": self.calls,

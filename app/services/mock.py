@@ -1,3 +1,5 @@
+"""Deterministic mock analysis used when model providers are disabled or unavailable."""
+
 import hashlib
 import time
 
@@ -10,6 +12,7 @@ class MockScenarioError(RuntimeError):
 
 
 def _pick(values: list, seed: int):
+    """Select a deterministic list item from a seed."""
     return values[seed % len(values)]
 
 

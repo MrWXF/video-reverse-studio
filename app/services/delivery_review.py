@@ -1,3 +1,5 @@
+"""Evaluate delivered videos against the structure and timing of a prompt plan."""
+
 import logging
 import math
 import subprocess
@@ -25,6 +27,7 @@ def _update_review(
     progress: float | None = None,
     error: str | None = None,
 ) -> None:
+    """Update review progress, clamp the ratio, and commit immediately."""
     if status is not None:
         review.status = status
     if step is not None:
@@ -93,6 +96,11 @@ def run_delivery_review(review_id: str, request_id: str | None = None) -> None:
 
 
 def evaluate_delivery(path: Path, plan: PromptPlan, settings) -> dict:
+    """Compare delivered shot count, timing, ratio, and palette with the plan.
+
+    The function probes and segments the uploaded video, samples average colours,
+    and returns a structured review. It does not persist the result.
+    """
     if not path.exists():
         raise FileNotFoundError("成片文件不存在")
     meta = media.probe(path, settings)
@@ -207,6 +215,7 @@ def evaluate_delivery(path: Path, plan: PromptPlan, settings) -> dict:
 
 
 def _aspect_score(ratio: str, width: int, height: int) -> float:
+    """Score how closely the delivered dimensions match the requested ratio."""
     if not width or not height:
         return 0.0
     try:
@@ -219,6 +228,7 @@ def _aspect_score(ratio: str, width: int, height: int) -> float:
 
 
 def _average_color(ffmpeg: str, video: Path, timestamp: float) -> str:
+    """Sample one frame and return its average color as a hex string."""
     command = [
         ffmpeg,
         "-hide_banner",
@@ -250,6 +260,7 @@ def _average_color(ffmpeg: str, video: Path, timestamp: float) -> str:
 
 
 def _hex_rgb(value: str) -> tuple[int, int, int] | None:
+    """Parse a six-digit hex color, returning ``None`` for invalid input."""
     text = str(value or "").strip().lstrip("#")
     if len(text) != 6:
         return None
@@ -260,6 +271,7 @@ def _hex_rgb(value: str) -> tuple[int, int, int] | None:
 
 
 def _nearest_palette_score(color: str, palette: list[str]) -> float:
+    """Score a sampled color by its distance to the nearest expected palette color."""
     actual = _hex_rgb(color)
     if actual is None:
         return 0.0
@@ -279,6 +291,7 @@ def _nearest_palette_score(color: str, palette: list[str]) -> float:
 
 
 def _palette_similarity(expected: list[str], actual: list[str]) -> float | None:
+    """Average nearest-color scores across the expected palette."""
     colors = [color for color in expected if _hex_rgb(color)]
     if not colors or not actual:
         return None

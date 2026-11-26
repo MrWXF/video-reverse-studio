@@ -18,10 +18,12 @@ _active_streams = 0
 
 
 def _event(name: str, payload: dict) -> str:
+    """Format one named server-sent event."""
     return f"event: {name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 def _acquire_stream(limit: int) -> bool:
+    """Reserve one SSE connection slot without waiting."""
     global _active_streams
     with _stream_lock:
         if _active_streams >= max(1, limit):
@@ -31,17 +33,20 @@ def _acquire_stream(limit: int) -> bool:
 
 
 def _release_stream() -> None:
+    """Release one SSE connection slot, never going below zero."""
     global _active_streams
     with _stream_lock:
         _active_streams = max(0, _active_streams - 1)
 
 
 def active_streams() -> int:
+    """Return the number of open SSE streams."""
     with _stream_lock:
         return _active_streams
 
 
 def reset_for_tests() -> None:
+    """Reset global SSE connection accounting for isolated tests."""
     global _active_streams
     with _stream_lock:
         _active_streams = 0
@@ -52,6 +57,7 @@ async def _stream(
     load_payload: Callable[[], dict | None],
     missing_detail: str,
 ) -> AsyncGenerator[str, None]:
+    """Poll a job payload and stream progress, heartbeats, and a terminal event."""
     settings = get_settings()
     if not _acquire_stream(settings.sse_max_connections):
         yield _event("error", {"detail": "实时状态连接数已达上限，请稍后重试"})
@@ -90,6 +96,7 @@ async def _stream(
 
 
 def _job_payload(job_id: str) -> dict | None:
+    """Load the minimal job payload needed by an SSE client."""
     with SessionLocal() as db:
         job = db.get(Job, job_id)
         if job is None:
@@ -104,6 +111,7 @@ def _job_payload(job_id: str) -> dict | None:
 
 
 def _prompt_payload(project_id: str) -> dict | None:
+    """Load the minimal prompt-project payload needed by an SSE client."""
     with SessionLocal() as db:
         project = db.get(PromptProject, project_id)
         if project is None:
@@ -118,6 +126,7 @@ def _prompt_payload(project_id: str) -> dict | None:
 
 
 async def job_event_stream(request: Request, job_id: str) -> AsyncGenerator[str, None]:
+    """Stream status for an analysis job."""
     async for event in _stream(request, lambda: _job_payload(job_id), "任务不存在"):
         yield event
 
@@ -125,6 +134,7 @@ async def job_event_stream(request: Request, job_id: str) -> AsyncGenerator[str,
 async def prompt_event_stream(
     request: Request, project_id: str
 ) -> AsyncGenerator[str, None]:
+    """Stream status for a prompt-generation project."""
     async for event in _stream(
         request,
         lambda: _prompt_payload(project_id),

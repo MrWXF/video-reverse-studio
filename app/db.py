@@ -1,3 +1,5 @@
+"""Database engine setup, session lifecycle, and lightweight SQLite migrations."""
+
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
 
@@ -13,10 +15,13 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 
 
 class Base(DeclarativeBase):
+    """Declarative base shared by all persisted models."""
+
     pass
 
 
 def init_db() -> None:
+    """Create missing tables and apply lightweight SQLite migrations on startup."""
     from . import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
@@ -51,6 +56,8 @@ def _ensure_sqlite_columns(target_engine=None) -> None:
 
 @dataclass(frozen=True)
 class _Migration:
+    """One ordered, idempotent SQLite schema migration."""
+
     version: int
     name: str
     apply: Callable[[object], None]
@@ -100,6 +107,7 @@ def _apply_sqlite_migrations(target_engine=None) -> list[int]:
 
 
 def get_db() -> Generator[Session, None, None]:
+    """Yield one request-scoped session and always close it afterwards."""
     db = SessionLocal()
     try:
         yield db

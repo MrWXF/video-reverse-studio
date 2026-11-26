@@ -23,10 +23,13 @@ logger = logging.getLogger(__name__)
 
 
 class JobCancelled(Exception):
+    """Internal signal used when a user cancels an analysis job."""
+
     pass
 
 
 def project_dir(project_id: str, settings: Settings | None = None) -> Path:
+    """Return the managed media directory for one project."""
     settings = settings or get_settings()
     return settings.data_dir / "projects" / project_id
 
@@ -40,6 +43,7 @@ def _update_job(
     progress: float | None = None,
     error: str | None = None,
 ) -> None:
+    """Persist job status and clamp progress into the public 0..1 range."""
     if status is not None:
         job.status = status
     if step is not None:
@@ -286,6 +290,7 @@ def _analyze_shots(
     results: list[ShotAnalysis] = []
 
     def work(index: int) -> ShotAnalysis:
+        """Analyze one indexed keyframe and attach overlapping transcript text."""
         start, end = segments[index]
         transcript = fusion.attach_transcript(transcripts, start, end)
         return vision.analyze_shot(

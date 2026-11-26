@@ -1,3 +1,5 @@
+"""Load versioned prompt templates and the shot-vocabulary catalog bundled with the app."""
+
 import json
 import logging
 from pathlib import Path
@@ -10,6 +12,7 @@ _CATALOG_CACHE: dict[tuple[str, int], dict] = {}
 
 
 def load_prompt(name: str) -> str:
+    """Read one bundled Markdown prompt template by name."""
     return (_PROMPT_DIR / f"{name}.md").read_text(encoding="utf-8")
 
 

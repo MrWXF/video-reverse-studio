@@ -25,6 +25,7 @@ router = APIRouter()
 
 
 def _prompt_plan(project: PromptProject) -> PromptPlan:
+    """Parse a completed prompt plan or map missing/corrupt data to HTTP errors."""
     if project.status != "done" or not project.plan_json:
         raise HTTPException(status_code=409, detail="提示词方案尚未生成完成")
     try:
@@ -35,6 +36,7 @@ def _prompt_plan(project: PromptProject) -> PromptPlan:
 
 @router.get("/api/projects/{project_id}/cost")
 def project_cost(project_id: str, db: Session = Depends(get_db)) -> dict:
+    """Return the latest analysis job's usage metrics and estimated cost."""
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -56,6 +58,7 @@ def project_cost(project_id: str, db: Session = Depends(get_db)) -> dict:
 
 @router.get("/api/prompt-projects/{project_id}/cost")
 def prompt_project_cost(project_id: str, db: Session = Depends(get_db)) -> dict:
+    """Return prompt-generation usage metrics and estimated cost."""
     project = db.get(PromptProject, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="提示词项目不存在")
@@ -77,6 +80,7 @@ def prompt_project_cost(project_id: str, db: Session = Depends(get_db)) -> dict:
     ),
 )
 def estimate_project_cost(payload: CostEstimateRequest) -> dict:
+    """Estimate analysis cost from video duration, shot count, and configured prices."""
     return cost.estimate_project_cost(
         payload.video_duration,
         payload.estimated_shots,
@@ -96,6 +100,7 @@ def quality_dashboard(
     days: int = Query(default=30, ge=7, le=90),
     db: Session = Depends(get_db),
 ) -> dict:
+    """Aggregate edit rates, correction fields, latency, and spend for a time window."""
     return quality.build_quality_dashboard(db, days=days)
 
 
@@ -105,6 +110,7 @@ def list_edit_events(
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
 ) -> list[dict]:
+    """List manual and timeline edit events for one project, newest-first."""
     if db.get(Project, project_id) is None:
         raise HTTPException(status_code=404, detail="项目不存在")
     events = db.scalars(
@@ -138,6 +144,7 @@ def save_shot_template(
     payload: ShotTemplateSave,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Create a reusable shot template from an existing analyzed shot."""
     shot = db.scalar(
         select(Shot).where(
             Shot.id == shot_id,
@@ -161,6 +168,7 @@ def list_shot_templates(
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
 ) -> list[dict]:
+    """Search templates by category, all requested tags, and free-text fields."""
     templates = db.scalars(
         select(ShotTemplate).order_by(ShotTemplate.created_at.desc()).limit(1000)
     ).all()
@@ -210,6 +218,7 @@ def list_shot_templates(
 
 @router.get("/api/shot-templates/facets")
 def shot_template_facets(db: Session = Depends(get_db)) -> dict:
+    """Return template counts grouped by category and tag for filter controls."""
     templates = db.scalars(select(ShotTemplate)).all()
     categories: Counter[str] = Counter()
     tags: Counter[str] = Counter()
@@ -238,6 +247,7 @@ def shot_template_facets(db: Session = Depends(get_db)) -> dict:
 
 @router.delete("/api/shot-templates/{template_id}")
 def delete_shot_template(template_id: int, db: Session = Depends(get_db)) -> dict:
+    """Delete a reusable shot template."""
     template = db.get(ShotTemplate, template_id)
     if template is None:
         raise HTTPException(status_code=404, detail="模板不存在")
@@ -252,6 +262,7 @@ def apply_shot_template(
     payload: ShotTemplateApply,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Apply a template to a prompt shot, merge warnings, and snapshot the plan."""
     project = db.scalar(
         select(PromptProject)
         .options(selectinload(PromptProject.versions))

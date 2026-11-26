@@ -1,3 +1,5 @@
+"""Shared retry classification and bounded exponential-backoff helpers."""
+
 import logging
 import subprocess
 import time
@@ -14,6 +16,7 @@ class RetryableServiceError(RuntimeError):
 
 
 def is_retryable_exception(exc: BaseException) -> bool:
+    """Classify transient provider, timeout, and process errors as retryable."""
     if isinstance(
         exc,
         (RetryableServiceError, TimeoutError, ConnectionError, subprocess.TimeoutExpired),

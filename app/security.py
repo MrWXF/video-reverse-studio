@@ -1,3 +1,5 @@
+"""Optional HTTP Basic authentication helpers and middleware."""
+
 import base64
 import secrets
 
@@ -13,6 +15,7 @@ _UNAUTHORIZED_HEADERS = {
 
 
 def decode_basic_auth(header: str) -> tuple[str, str] | None:
+    """Decode an HTTP Basic header into username/password, or return ``None``."""
     scheme, _, token = header.partition(" ")
     if scheme.lower() != "basic" or not token:
         return None
@@ -27,6 +30,7 @@ def decode_basic_auth(header: str) -> tuple[str, str] | None:
 
 
 def verify_basic_auth(header: str, username: str, password: str) -> bool:
+    """Compare supplied Basic credentials in constant time."""
     credentials = decode_basic_auth(header)
     if credentials is None:
         return False
@@ -41,10 +45,17 @@ def verify_basic_auth(header: str, username: str, password: str) -> bool:
 
 
 class BasicAuthMiddleware:
+    """Protect application routes when ``APP_PASSWORD`` is configured.
+
+    Health checks, static files, and token-scoped share endpoints remain public.
+    """
+
     def __init__(self, app):
+        """Store the wrapped ASGI application."""
         self.app = app
 
     async def __call__(self, scope, receive, send):
+        """Allow public paths or require valid Basic credentials."""
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
