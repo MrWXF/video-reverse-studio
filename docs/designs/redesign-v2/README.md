@@ -1,24 +1,19 @@
-# ReelReverse 前端重设计 · Simple Studio
+﻿# ReelReverse 前端重设计 · Simple Studio
 
 日期：2026-11-27  
-状态：待确认设计方向，未修改生产前端代码。
+状态：已确认方向，并已完成生产前端落地。
 
 ## 先看这里
 
+- 生产页面：`http://127.0.0.1:8123/app`
+- 工作台首页：`http://127.0.0.1:8123/app/reverse`
+- 项目工作台：`http://127.0.0.1:8123/app/reverse/<projectId>`
+- 提示词工作室：`http://127.0.0.1:8123/app/generate`
+- 质量洞察：`http://127.0.0.1:8123/app/quality`
 - 设计评审板：`index.html`
-- 工作台首页：`home.html`
-- 项目工作台：`workspace.html`
-- 提示词工作室：`prompt-studio.html`
-- 移动端首页：`mobile.html`
-- 预览截图：`previews/`
-
-可以直接双击 HTML 打开，也可以在本目录启动静态预览：
-
-```powershell
-python -m http.server 8091 --directory docs/designs/redesign-v2
-```
-
-然后打开 `http://127.0.0.1:8091/`。
+- 设计稿：`home.html`、`workspace.html`、`prompt-studio.html`、`mobile.html`
+- 设计稿截图：`previews/`
+- 生产页面截图：`production-previews/`
 
 ## 重设计目标
 
@@ -28,27 +23,38 @@ python -m http.server 8091 --directory docs/designs/redesign-v2
 4. 去掉大面积紫色渐变、重复统计卡和过密的信息块，改用暖白画布、墨黑文字和单一珊瑚橙主操作色。
 5. 桌面端使用顶部导航，移动端使用底部四入口，减少侧栏与弹窗切换。
 
-## 页面说明
+## 生产实现
+
+### 应用外壳
+
+- `web/src/components/AppLayout.tsx`：顶部品牌、工作台/提示词/质量导航、服务状态、新建分析、移动端底部导航。
+- 移除了旧的“光晕 / 霓虹”主题切换。
+- `web/src/styles/studio-simple.css`：新版设计 token、卡片、按钮、表单、页面布局和移动端适配。
 
 ### 工作台首页
 
 - 上传区占据主卡片全宽，是唯一主视觉操作。
-- 最近项目和“继续上次”放在右侧，不抢夺首屏焦点。
-- 统计信息压缩成两个轻量数字，不再用四张 KPI 卡片占满一屏。
+- “继续上次”和最近项目放在右侧，不抢夺首屏焦点。
+- 保留上传、拖拽、文件大小校验、时长读取、成本预估、项目搜索、状态筛选和刷新。
 
 ### 项目工作台
 
-- 视频、镜头缩略图、镜头详情同屏。
-- AI 摘要使用“为什么有效”的解释性表达，而不是继续堆 Token 和原始字段。
-- 完整镜头索引收在右栏，点击即可切换，避免一次平铺 24 张卡片。
-- “生成提示词”作为项目页唯一高优先级下一步。
+- 视频、镜头缩略图、选中镜头详情同屏。
+- 右侧展示 AI 摘要和完整镜头索引，点击缩略图或索引会定位视频。
+- 时间轴编辑、边界拖动、键盘微调、拆分、合并、局部重分析、取消、重分析、删除、导出 Markdown/JSON、SSE 刷新全部保留。
+- 原始视频、创作底稿和用量改为可展开区域，降低首屏密度。
 
 ### 提示词工作室
 
-- 用三步进度明确当前阶段。
-- 创意描述、模板、镜头数、时长和比例集中在一张表内。
-- 右侧固定展示方案摘要和生成按钮，生成前可完整确认。
-- 生成结果先给出可扫描的镜头列表，再进入单镜头复制与编辑。
+- 三步进度：创意 Brief → 生成分镜 → 导出方案。
+- 表单与右侧方案摘要同屏，生成按钮固定在摘要卡中。
+- 生成结果支持逐镜复制、复制全部、导出 Markdown/JSON、重新生成和视频生成记录。
+- 已修复旧版 `/app/generate` 因 `job.result` 为空导致的 `Cannot read properties of undefined (reading 'map')` 空屏问题。
+
+### 质量洞察
+
+- 保留原有 KPI、字段修正、趋势、项目明细和建议逻辑。
+- 统一套用新版卡片、颜色、字号和响应式布局。
 
 ## 视觉系统
 
@@ -58,10 +64,13 @@ python -m http.server 8091 --directory docs/designs/redesign-v2
 | Surface | `#FFFDF8` |
 | Ink | `#1B1A16` |
 | Accent | `#FF5A36` |
+| Accent strong | `#DB3D1C` |
 | Success | `#31875D` |
 | Border | `#DDD7CA` |
 | Radius | `18–22px` |
 | Motion | `160–200ms` |
+
+字体使用系统字体，不依赖 Google Fonts 或 CDN。
 
 ## 使用的能力与工具
 
@@ -81,19 +90,18 @@ python -m http.server 8091 --directory docs/designs/redesign-v2
 
 ### 工具
 
-- Codex Shell 与仓库文件读取：审查现有 React 页面、样式和路由。
-- 本地 FastAPI 服务：读取真实项目数据与当前页面状态。
-- Chromium Headless Shell：截取当前页面并验证设计稿渲染。
-- HTML / CSS：实现可离线打开的高保真设计稿。
+- Codex Shell 与仓库文件读取：审查 React 页面、路由、API 和样式。
+- 本地 FastAPI 服务：读取真实项目数据并做生产页面验证。
+- Chromium Headless Shell：截取桌面端 1440px 和移动端 390px 页面。
+- TypeScript / Vite / npm：类型检查与生产构建。
+- pytest / ruff：后端测试与静态检查。
 
-## 实现阶段建议
+## 验证结果
 
-1. 先重构 `AppLayout`：从左侧栏改为顶部导航 + 移动底部导航。
-2. 重写首页信息层级：上传主卡片 + 最近项目侧栏。
-3. 将项目详情拆成“概览 / 镜头 / 提示词 / 质量”四个标签，默认镜头视图。
-4. 重做提示词表单为三步流程，并修复当前 `/app/generate` 在浏览器中出现的空屏报错。
-5. 用同一套设计 token 替换现有 `studio-*.css`，最后补桌面与移动端截图回归。
-
-## 已知现状
-
-截图过程中发现当前 `/app/generate` 页面在浏览器控制台报 `Cannot read properties of undefined (reading 'map')`，页面为空。该问题应在生产前端落地时一并修复。
+- `npm run typecheck`：通过。
+- `npm run build`：通过。
+- `python -m pytest -q`：`140 passed`。
+- `python -m ruff check app tests`：通过。
+- 桌面端回归页面：首页、项目详情、提示词生成、质量洞察。
+- 移动端回归页面：首页、项目详情、提示词生成、质量洞察。
+- `/app/generate` 已使用真实失败方案、真实完成方案和空状态验证，不再出现空屏。

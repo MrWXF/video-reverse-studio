@@ -14,7 +14,7 @@ import { StatusBadge } from "../../components/StatusBadge";
 import { useApiQuery } from "../../hooks/useApiQuery";
 import { useJobEvents } from "../../hooks/useJobEvents";
 import { useUiStore } from "../../store/uiStore";
-import { formatClock, formatCost, formatNumber } from "../../utils/format";
+import { formatClock, formatCost, formatNumber, ORIGIN_LABELS } from "../../utils/format";
 import { ShotCard } from "./ShotCard";
 import { TimelineEditor } from "./TimelineEditor";
 
@@ -150,7 +150,7 @@ function ShotFocus({ shot, position, project }: { shot: Shot; position: number; 
         <p>{analysis.remake_notes || analysis.scene || analysis.visual_style || "这个镜头还没有补充说明。"}</p>
         <div className="rr-tag-row">
           {tags.map((tag) => <span className="rr-tag" key={tag}>{tag}</span>)}
-          {shot.origin ? <span className="rr-tag is-soft">{shot.origin}</span> : null}
+          {shot.origin ? <span className="rr-tag is-soft">{ORIGIN_LABELS[shot.origin] ?? shot.origin}</span> : null}
         </div>
       </div>
 
@@ -524,3 +524,4 @@ export function ProjectDetail({ projectId, onChanged }: { projectId: string; onC
     </div>
   );
 }
+
