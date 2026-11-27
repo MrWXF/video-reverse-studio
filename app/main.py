@@ -3,14 +3,12 @@
 import logging
 from contextlib import asynccontextmanager
 from copy import deepcopy
-from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
 
 from .api.generation_routes import router as generation_router
 from .api.insight_routes import router as insight_router
@@ -18,14 +16,15 @@ from .api.prompt_routes import router as prompt_router
 from .api.routes import router
 from .api.share_routes import router as share_router
 from .config import PROJECT_ROOT, get_settings
-from .db import SessionLocal, init_db
-from .models import GenerationJob, Job, PromptProject
+from .db import init_db
 from .observability import (
     RequestContextMiddleware,
     configure_logging,
     current_request_id,
 )
+from .request_limits import RequestBodyLimitMiddleware
 from .security import BasicAuthMiddleware
+from .services import task_queue
 from .services.redaction import redact_exception
 
 settings = get_settings()
@@ -35,50 +34,13 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Initialize storage and fail jobs that were interrupted by a restart."""
+    """Initialize storage, recover durable tasks, and run the dispatcher."""
     init_db()
-    with SessionLocal() as db:
-        stale = db.scalars(
-            select(Job).where(Job.status.in_(["queued", "running"]))
-        ).all()
-        for job in stale:
-            job.status = "failed"
-            job.error = "服务重启导致任务中断，请重新分析"
-            job.updated_at = datetime.now(timezone.utc)
-        if stale:
-            db.commit()
-            logger.warning("marked %s stale jobs as failed", len(stale))
-        stale_prompts = db.scalars(
-            select(PromptProject).where(
-                PromptProject.status.in_(["queued", "running"])
-            )
-        ).all()
-        for project in stale_prompts:
-            project.status = "failed"
-            project.step = "failed"
-            project.error = "服务重启导致生成任务中断，请重新生成"
-            project.updated_at = datetime.now(timezone.utc)
-        if stale_prompts:
-            db.commit()
-            logger.warning(
-                "marked %s stale prompt projects as failed", len(stale_prompts)
-            )
-        stale_generations = db.scalars(
-            select(GenerationJob).where(
-                GenerationJob.status.in_(["queued", "running"])
-            )
-        ).all()
-        for job in stale_generations:
-            job.status = "failed"
-            job.step = "failed"
-            job.error = "服务重启导致视频生成任务中断，请重新生成"
-            job.updated_at = datetime.now(timezone.utc)
-        if stale_generations:
-            db.commit()
-            logger.warning(
-                "marked %s stale generation jobs as failed", len(stale_generations)
-            )
-    yield
+    task_queue.start_dispatcher()
+    try:
+        yield
+    finally:
+        task_queue.stop_dispatcher()
 
 
 app = FastAPI(
@@ -90,8 +52,9 @@ app = FastAPI(
         "两个入口共享同一套 v1 语义。"
     ),
 )
-app.add_middleware(BasicAuthMiddleware)
 app.add_middleware(RequestContextMiddleware)
+app.add_middleware(BasicAuthMiddleware)
+app.add_middleware(RequestBodyLimitMiddleware)
 app.include_router(router, tags=["video-analysis"])
 app.include_router(prompt_router, tags=["prompt-studio"])
 app.include_router(insight_router, tags=["phase1-insights"])
@@ -130,6 +93,24 @@ def custom_openapi() -> dict:
                 operation["operationId"] = f"{operation_id}_v1"
             operation["tags"] = ["API v1"]
         paths[versioned_path] = versioned
+    components = schema.setdefault("components", {})
+    components.setdefault("securitySchemes", {})["BasicAuth"] = {
+        "type": "http",
+        "scheme": "basic",
+        "description": "配置 APP_PASSWORD 后，业务接口需要 HTTP Basic 认证。",
+    }
+    for path, operations in paths.items():
+        public = (
+            path == "/healthz"
+            or path.startswith("/share/")
+            or path.startswith("/api/shares/")
+            or path.startswith("/api/v1/shares/")
+        )
+        if public:
+            continue
+        for operation in operations.values():
+            if isinstance(operation, dict):
+                operation.setdefault("security", [{"BasicAuth": []}])
     schema["paths"] = paths
     app.openapi_schema = schema
     return schema

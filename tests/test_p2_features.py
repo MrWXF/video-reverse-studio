@@ -9,13 +9,21 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app import security
-from app.api import prompt_routes, routes
+from app.api import prompt_routes, routes, share_routes
 from app.config import Settings, get_settings
 from app.db import Base, get_db
 from app.main import app
-from app.models import Job, Project, PromptProject, PromptShare
+from app.models import (
+    DeliveryReview,
+    GenerationJob,
+    Job,
+    Project,
+    PromptProject,
+    PromptShare,
+    TaskRun,
+)
 from app.schemas import PromptPlan, PromptShot
-from app.services import delivery_review, media, model_profiles, prompt_generation, sse
+from app.services import capacity, delivery_review, media, model_profiles, prompt_generation, sse
 
 
 @pytest.fixture
@@ -219,6 +227,26 @@ def test_share_page_and_api_remain_public_with_basic_auth(p2_client, monkeypatch
     assert client.get(f"/api/shares/{share['token']}").status_code == 200
 
 
+def test_share_comments_are_rate_limited(p2_client, monkeypatch):
+    client, _, settings, _ = p2_client
+    project_id = create_prompt(client)
+    share = client.post(
+        f"/api/prompt-projects/{project_id}/shares",
+        json={"permission": "comment"},
+    ).json()
+    limited = settings.model_copy(
+        update={"share_comment_limit": 1, "share_comment_window_s": 60}
+    )
+    monkeypatch.setattr(share_routes, "get_settings", lambda: limited)
+    share_routes.reset_comment_limits_for_tests()
+
+    payload = {"author": "客户", "content": "节奏不错"}
+    assert client.post(f"/api/shares/{share['token']}/comments", json=payload).status_code == 201
+    blocked = client.post(f"/api/shares/{share['token']}/comments", json=payload)
+    assert blocked.status_code == 429
+    assert int(blocked.headers["retry-after"]) >= 1
+
+
 def test_delivery_review_scores_shots_and_palette(p2_client, monkeypatch, tmp_path):
     _, _, _, data_dir = p2_client
     video = data_dir / "delivery.mp4"
@@ -262,7 +290,7 @@ def test_review_upload_route_and_delete(p2_client, monkeypatch):
     client, _, _, _ = p2_client
     project_id = create_prompt(client)
     monkeypatch.setattr(
-        prompt_routes.delivery_review,
+        delivery_review,
         "run_delivery_review",
         lambda review_id, request_id=None: None,
     )
@@ -289,6 +317,109 @@ def test_review_upload_route_and_delete(p2_client, monkeypatch):
     deleted = client.delete(f"/api/prompt-projects/{project_id}/reviews/{review['id']}")
     assert deleted.status_code == 200
     assert client.get(f"/api/prompt-projects/{project_id}/reviews").json() == []
+
+
+def test_prompt_project_delete_removes_generation_and_review_files(p2_client):
+    client, testing_session, settings, _ = p2_client
+    project_id = create_prompt(client)
+    review_id = "review-cleanup"
+    generation_id = "generation-cleanup"
+
+    with testing_session() as db:
+        db.add(
+            DeliveryReview(
+                id=review_id,
+                prompt_project_id=project_id,
+                filename="delivery.mp4",
+                source_path="unused",
+                status="done",
+                step="done",
+            )
+        )
+        db.add(
+            GenerationJob(
+                id=generation_id,
+                prompt_project_id=project_id,
+                provider="mock",
+                model="mock-v1",
+                status="succeeded",
+                step="done",
+            )
+        )
+        db.commit()
+
+    review_dir = settings.data_dir / "reviews" / review_id
+    generation_dir = settings.data_dir / "generations" / project_id / generation_id
+    review_dir.mkdir(parents=True)
+    generation_dir.mkdir(parents=True)
+    (review_dir / "delivery.mp4").write_bytes(b"review")
+    (generation_dir / "shot-01.mp4").write_bytes(b"generation")
+
+    deleted = client.delete(f"/api/prompt-projects/{project_id}")
+
+    assert deleted.status_code == 200
+    assert not review_dir.exists()
+    assert not generation_dir.exists()
+
+
+def test_reverse_project_delete_cancels_tasks_and_removes_files(p2_client):
+    client, testing_session, settings, _ = p2_client
+    project_id = "reverse-delete"
+    project_dir = settings.data_dir / "projects" / project_id
+    project_dir.mkdir(parents=True)
+    source = project_dir / "source.mp4"
+    source.write_bytes(b"video")
+
+    with testing_session() as db:
+        db.add(Project(id=project_id, title="待删除", source_path=str(source), status="running"))
+        db.add(Job(id="reverse-delete-job", project_id=project_id, status="running", step="analyzing"))
+        db.add(
+            PromptProject(
+                id="linked-prompt",
+                title="引用项目",
+                source_project_id=project_id,
+                status="done",
+                step="done",
+            )
+        )
+        db.add(
+            TaskRun(
+                id="reverse-delete-task",
+                kind="analysis",
+                ref_id="reverse-delete-job",
+                status="running",
+                attempts=1,
+            )
+        )
+        db.commit()
+
+    deleted = client.delete(f"/api/projects/{project_id}")
+
+    assert deleted.status_code == 200
+    assert not project_dir.exists()
+    with testing_session() as db:
+        assert db.get(Project, project_id) is None
+        assert db.get(PromptProject, "linked-prompt").source_project_id is None
+        assert db.get(TaskRun, "reverse-delete-task").status == "cancelled"
+
+
+def test_invalid_upload_does_not_leak_capacity(p2_client):
+    client, _, _, _ = p2_client
+    capacity.reset_for_tests()
+
+    wrong_suffix = client.post(
+        "/api/projects",
+        files={"file": ("notes.txt", b"not video", "text/plain")},
+    )
+    assert wrong_suffix.status_code == 400
+    assert capacity.active_jobs("analysis") == 0
+
+    wrong_content = client.post(
+        "/api/projects",
+        files={"file": ("fake.mp4", b"not a video header", "video/mp4")},
+    )
+    assert wrong_content.status_code == 400
+    assert capacity.active_jobs("analysis") == 0
 
 
 def test_prompt_and_reverse_job_cancel_with_terminal_sse(p2_client):

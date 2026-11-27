@@ -13,7 +13,7 @@ from ..models import GenerationJob, PromptProject
 from ..observability import current_request_id
 from ..schemas import GenerationJobCreate
 from ..serializers import generation_job_payload
-from ..services import capacity, generation
+from ..services import capacity, generation, task_queue
 from ..services.generation_adapters import GenerationProviderError
 
 router = APIRouter()
@@ -65,22 +65,31 @@ def start_generation(
     """
     settings = get_settings()
     project = _get_project(db, project_id)
-    if not capacity.has_capacity(settings.max_active_generation_jobs):
+    if not capacity.reserve("generation", settings.max_active_generation_jobs):
         raise HTTPException(status_code=503, detail="当前视频生成任务已达并发上限，请稍后重试")
+    handed_off = False
     try:
         job, reused = generation.create_generation_job(db, project, payload, settings)
+        if not reused:
+            task = task_queue.enqueue(
+                db,
+                "generation",
+                job.id,
+                request_id=current_request_id(),
+            )
+            task_queue.schedule(background, db, task)
+        else:
+            capacity.release_job("generation")
+        handed_off = True
     except generation.GenerationPlanError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except generation.GenerationSelectionError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except GenerationProviderError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    if not reused:
-        background.add_task(
-            generation.run_generation_job,
-            job.id,
-            request_id=current_request_id(),
-        )
+    finally:
+        if not handed_off:
+            capacity.release_job("generation")
     data = generation_job_payload(job)
     data["reused"] = reused
     return data
@@ -113,6 +122,7 @@ def cancel_generation_job(job_id: str, db: Session = Depends(get_db)) -> dict:
         job = generation.cancel_generation_job(db, job)
     except generation.GenerationSelectionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    task_queue.cancel_for(db, "generation", [job.id], "用户已取消生成")
     return generation_job_payload(job)
 
 

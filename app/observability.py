@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import time
 import uuid
 from contextvars import ContextVar
@@ -12,10 +13,20 @@ from .services.redaction import redact_text
 
 request_id_ctx: ContextVar[str] = ContextVar("request_id", default="")
 
+_SHARE_PATH = re.compile(r"^(/share/|/api/shares/)[^/]+(.*)$")
+
 
 def current_request_id() -> str:
     """Return the request id bound to the current execution context."""
     return request_id_ctx.get()
+
+
+def safe_log_path(path: str) -> str:
+    """Hide share tokens, which are bearer credentials, from access logs."""
+    match = _SHARE_PATH.match(path)
+    if match is None:
+        return path
+    return f"{match.group(1)}<token>{match.group(2)}"
 
 
 class RequestIdFilter(logging.Filter):
@@ -101,6 +112,14 @@ class RequestContextMiddleware:
                 response_headers.append((b"x-request-id", request_id.encode("latin-1")))
                 response_headers.append((b"x-api-version", api_version.encode("ascii")))
                 response_headers.append((b"x-content-type-options", b"nosniff"))
+                response_headers.append((b"x-frame-options", b"DENY"))
+                response_headers.append((b"referrer-policy", b"no-referrer"))
+                response_headers.append(
+                    (
+                        b"permissions-policy",
+                        b"camera=(), microphone=(), geolocation=()",
+                    )
+                )
                 if path.startswith("/static/"):
                     response_headers.append(
                         (b"cache-control", b"public, max-age=3600, stale-while-revalidate=86400")
@@ -111,7 +130,7 @@ class RequestContextMiddleware:
         logger.info(
             "request_started method=%s path=%s",
             scope.get("method", ""),
-            path,
+            safe_log_path(path),
         )
         try:
             await self.app(scope, receive, send_with_headers)
@@ -119,7 +138,7 @@ class RequestContextMiddleware:
             logger.info(
                 "request_finished method=%s path=%s duration_ms=%.1f",
                 scope.get("method", ""),
-                path,
+                safe_log_path(path),
                 (time.monotonic() - started) * 1000,
             )
             request_id_ctx.reset(token)

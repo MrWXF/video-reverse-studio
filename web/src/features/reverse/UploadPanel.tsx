@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
+﻿import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
 
-import { createProject, estimateCost } from "../../api/endpoints";
+import { createProject, estimateCost, fetchHealth } from "../../api/endpoints";
 import type { CostEstimate } from "../../api/types";
 import { CostEstimateCard } from "../../components/CostEstimateCard";
+import { Icon } from "../../components/Icon";
+import { useApiQuery } from "../../hooks/useApiQuery";
 import { useUiStore } from "../../store/uiStore";
 import { readVideoDuration } from "../../utils/media";
 
@@ -20,9 +22,18 @@ export function UploadPanel({ onCreated }: UploadPanelProps) {
   const [uploading, setUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const showToast = useUiStore((state) => state.showToast);
+  const healthQuery = useApiQuery((signal) => fetchHealth(signal), []);
+  const maxUploadMb = healthQuery.data?.max_upload_mb ?? 500;
+  const maxBytes = maxUploadMb * 1024 * 1024;
+  const tooLarge = Boolean(file && file.size > maxBytes);
 
   const selectFile = (nextFile: File | null | undefined) => {
     if (!nextFile) {
+      return;
+    }
+    const looksLikeVideo = nextFile.type.startsWith("video/") || /\.(mp4|mov|webm|mkv|avi|m4v)$/i.test(nextFile.name);
+    if (!looksLikeVideo) {
+      showToast("请选择 MP4、MOV、WEBM、MKV、AVI 或 M4V 视频", "error");
       return;
     }
     setFile(nextFile);
@@ -72,7 +83,7 @@ export function UploadPanel({ onCreated }: UploadPanelProps) {
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!file || uploading) {
+    if (!file || uploading || tooLarge) {
       return;
     }
     const form = new FormData();
@@ -88,7 +99,7 @@ export function UploadPanel({ onCreated }: UploadPanelProps) {
       if (inputRef.current) {
         inputRef.current.value = "";
       }
-      showToast("任务已创建，正在分析镜头", "success");
+      showToast("分析任务已创建，可离开此页稍后回来查看", "success");
       onCreated(data.project_id);
     } catch (error) {
       showToast(error instanceof Error ? error.message : "上传失败", "error");
@@ -103,25 +114,36 @@ export function UploadPanel({ onCreated }: UploadPanelProps) {
     selectFile(event.dataTransfer.files[0]);
   };
 
-  const durationLabel = duration === null ? "读取视频时长…" : duration > 0 ? `~${duration.toFixed(1)}s` : "时长不可用";
+  const clearFile = () => {
+    setFile(null);
+    setEstimate(null);
+    setDuration(null);
+    if (inputRef.current) {
+      inputRef.current.value = "";
+    }
+  };
+
+  const durationLabel = duration === null ? "读取视频时长…" : duration > 0 ? `约 ${duration.toFixed(1)} 秒` : "时长暂不可用";
+  const fileSize = file ? `${(file.size / 1048576).toFixed(1)} MB` : "";
 
   return (
-    <section className="panel upload-panel" id="create">
-      <div className="panel-head">
+    <section className="rr-card rr-start-card" id="create" aria-labelledby="start-title">
+      <div className="rr-start-head">
         <div>
-          <p className="panel-kicker">NEW ANALYSIS</p>
-          <h2>上传参考视频</h2>
+          <span className="rr-step-badge">STEP 01 · 新建分析</span>
+          <h2 id="start-title">从一段视频开始</h2>
+          <p>支持 3–30 秒短片，画面越清晰，拆解越准确。</p>
         </div>
-        <span className="step-badge">01</span>
+        <span className="rr-limit-note">MAX {maxUploadMb} MB</span>
       </div>
-      <p className="panel-intro">拖入一段 3–30 秒的高质量参考片，系统会自动识别镜头结构与可复用的视觉语言。</p>
 
-      <form onSubmit={submit}>
+      <form className="rr-upload-form" onSubmit={submit}>
         <div
-          className={`dropzone${file ? " has-file" : ""}${dragging ? " dragging" : ""}`}
+          id="upload-video-input"
+          className={`rr-upload-zone${file ? " has-file" : ""}${dragging ? " is-dragging" : ""}${tooLarge ? " is-error" : ""}`}
           tabIndex={0}
           role="button"
-          aria-label="选择或拖入视频文件"
+          aria-label={file ? `已选择 ${file.name}，点击更换视频` : "选择或拖入视频文件"}
           onClick={() => inputRef.current?.click()}
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") {
@@ -137,53 +159,68 @@ export function UploadPanel({ onCreated }: UploadPanelProps) {
           <input
             ref={inputRef}
             type="file"
-            accept="video/mp4,video/quicktime,video/webm,video/x-matroska"
+            accept="video/mp4,video/quicktime,video/webm,video/x-matroska,video/x-msvideo,video/x-m4v"
             hidden
             onChange={(event) => selectFile(event.target.files?.[0])}
           />
-          <span className="upload-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 16V4" /><path d="m7 9 5-5 5 5" /><path d="M5 16v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3" />
-            </svg>
-          </span>
-          <strong>拖入视频，或点击选择</strong>
-          <span>MP4 / MOV / WEBM · 最大 500 MB</span>
-          <p className="filename">{file ? `${file.name} · ${(file.size / 1048576).toFixed(1)} MB` : "尚未选择文件"}</p>
+          {file ? (
+            <div className="rr-selected-file">
+              <span className="rr-file-icon"><Icon name="video" size={24} /></span>
+              <div className="rr-file-copy">
+                <strong>{file.name}</strong>
+                <span><Icon name="check" size={13} /> {fileSize} · {durationLabel}</span>
+                <small>{tooLarge ? `文件超过服务端 ${maxUploadMb} MB 限制` : "点击此处可更换视频"}</small>
+              </div>
+              <button
+                className="rr-file-remove"
+                type="button"
+                aria-label="移除已选择视频"
+                onClick={(event) => { event.stopPropagation(); clearFile(); }}
+              >
+                <Icon name="trash" size={16} />
+              </button>
+            </div>
+          ) : (
+            <div className="rr-upload-empty">
+              <span className="rr-upload-icon"><Icon name="upload" size={27} /></span>
+              <strong>拖入视频，或点击选择</strong>
+              <p>MP4 · MOV · WEBM · MKV · AVI · M4V</p>
+              <span className="rr-upload-hint">选择视频文件 <Icon name="arrow-right" size={13} /></span>
+            </div>
+          )}
         </div>
 
-        <label className="inline-field">
-          <span className="field-label">项目名称</span>
-          <input
-            type="text"
-            placeholder="可选，默认使用文件名"
-            maxLength={80}
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-          />
-        </label>
+        <div className="rr-start-form">
+          <label className="rr-input-shell">
+            <Icon name="folder" size={16} />
+            <span className="sr-only">项目名称</span>
+            <input
+              type="text"
+              placeholder="项目名称（可选）"
+              maxLength={80}
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+            />
+          </label>
+          <button className="rr-btn rr-btn-primary" type="submit" disabled={!file || uploading || tooLarge}>
+            <Icon name={uploading ? "refresh" : "sparkles"} size={17} className={uploading ? "is-spinning" : ""} />
+            {uploading ? "正在上传…" : "开始分析"}
+            {!uploading ? <Icon name="arrow-right" size={16} /> : null}
+          </button>
+        </div>
 
         {file ? (
-          <div className="cost-estimate" aria-live="polite">
-            <div className="cost-estimate-head">
-              <span>ESTIMATE BEFORE ANALYSIS</span>
-              <strong>预计分析成本</strong>
-              <small>{durationLabel}</small>
-            </div>
+          <details className="rr-upload-estimate" open>
+            <summary><span>预计分析成本</span><small>{durationLabel}</small><Icon name="chevron-down" size={15} /></summary>
             <CostEstimateCard estimate={estimate} loading={estimating} />
-          </div>
+          </details>
         ) : null}
 
-        <button className="btn btn-primary block" type="submit" disabled={!file || uploading}>
-          <span className="button-label">{uploading ? "上传中…" : "开始逆向分析"}</span>
-          <span className="arrow" aria-hidden="true">↗</span>
-        </button>
+        <div className="rr-start-foot">
+          <span><Icon name="clock" size={14} /> 提交后可离开页面，分析会在后台继续运行</span>
+          <span><Icon name="check" size={14} /> 自动切分镜头、分析画面并生成 Prompt</span>
+        </div>
       </form>
-
-      <ul className="mini-features">
-        <li>自动切分镜头并抽取关键帧</li>
-        <li>识别景别、运镜、光线与色板</li>
-        <li>生成可复用的 Prompt 与 Negative</li>
-      </ul>
     </section>
   );
 }

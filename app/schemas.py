@@ -142,19 +142,19 @@ class ShotAnalysisUpdate(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    shot_type: str | None = None
-    camera_movement: str | None = None
-    subject: str | None = None
-    scene: str | None = None
-    visual_style: str | None = None
-    lighting: str | None = None
-    color_palette: list[str] | None = None
+    shot_type: str | None = Field(default=None, max_length=80)
+    camera_movement: str | None = Field(default=None, max_length=100)
+    subject: str | None = Field(default=None, max_length=500)
+    scene: str | None = Field(default=None, max_length=500)
+    visual_style: str | None = Field(default=None, max_length=300)
+    lighting: str | None = Field(default=None, max_length=200)
+    color_palette: list[str] | None = Field(default=None, max_length=16)
     origin: Origin | None = None
     confidence: float | None = Field(default=None, ge=0, le=1)
-    evidence: list[str] | None = None
-    prompt: str | None = None
-    remake_notes: str | None = None
-    transcript: str | None = None
+    evidence: list[str] | None = Field(default=None, max_length=20)
+    prompt: str | None = Field(default=None, max_length=8000)
+    remake_notes: str | None = Field(default=None, max_length=2000)
+    transcript: str | None = Field(default=None, max_length=5000)
 
 
 class TimelineBoundaryUpdate(BaseModel):
@@ -183,7 +183,7 @@ class ShotTemplateSave(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = Field(default="", max_length=1000)
     category: str = Field(default="自定义", max_length=50)
-    tags: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list, max_length=20)
     prompt_template: str | None = Field(default=None, max_length=8000)
 
 
@@ -230,18 +230,18 @@ class PromptShotUpdate(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    shot_type: str | None = None
-    camera_movement: str | None = None
-    subject: str | None = None
-    action: str | None = None
-    scene: str | None = None
-    lighting: str | None = None
-    color_palette: list[str] | None = None
-    prompt: str | None = None
-    negative_prompt: str | None = None
-    transition: str | None = None
-    remake_notes: str | None = None
-    locked_fields: list[str] | None = None
+    shot_type: str | None = Field(default=None, max_length=80)
+    camera_movement: str | None = Field(default=None, max_length=100)
+    subject: str | None = Field(default=None, max_length=500)
+    action: str | None = Field(default=None, max_length=1000)
+    scene: str | None = Field(default=None, max_length=500)
+    lighting: str | None = Field(default=None, max_length=200)
+    color_palette: list[str] | None = Field(default=None, max_length=16)
+    prompt: str | None = Field(default=None, max_length=8000)
+    negative_prompt: str | None = Field(default=None, max_length=4000)
+    transition: str | None = Field(default=None, max_length=100)
+    remake_notes: str | None = Field(default=None, max_length=2000)
+    locked_fields: list[str] | None = Field(default=None, max_length=30)
 
 
 class GenerationJobCreate(BaseModel):
@@ -249,7 +249,7 @@ class GenerationJobCreate(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    shot_indices: list[int] = Field(default_factory=list)
+    shot_indices: list[int] = Field(default_factory=list, max_length=100)
     aspect_ratio: str = Field(default="", max_length=20)
     model: str = Field(default="", max_length=80)
     idempotency_key: str | None = Field(default=None, max_length=120)

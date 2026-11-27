@@ -65,66 +65,78 @@ def _update_project(
     db.commit()
 
 
-def run_prompt_generation(project_id: str, request_id: str | None = None) -> None:
+def run_prompt_generation(
+    project_id: str,
+    request_id: str | None = None,
+    *,
+    reserved: bool = False,
+) -> None:
     """Generate and persist a prompt plan with bounded concurrency and retries."""
     settings = get_settings()
     trace_id = request_id or f"prompt-{project_id}"
     token = request_id_ctx.set(trace_id)
+    slot_held = reserved or capacity.is_reserved("prompt")
+    if not slot_held:
+        slot_held = capacity.acquire_job(settings.max_active_jobs, kind="prompt")
+        if not slot_held:
+            with SessionLocal() as db:
+                project = db.get(PromptProject, project_id)
+                if project is not None:
+                    project.status = "failed"
+                    project.step = "failed"
+                    project.error = "系统繁忙，当前同时生成任务已达上限，请稍后重试"
+                    project.updated_at = datetime.now(timezone.utc)
+                    db.commit()
+            request_id_ctx.reset(token)
+            return
     try:
         with SessionLocal() as db:
             project = db.get(PromptProject, project_id)
             if project is None:
                 logger.error("prompt project missing: %s", project_id)
                 return
-            if not capacity.acquire_job(settings.max_active_jobs):
-                project.status = "failed"
-                project.step = "failed"
-                project.error = "系统繁忙，当前同时生成任务已达上限，请稍后重试"
+            db.refresh(project)
+            if project.status == "cancelled":
+                return
+            brief = PromptBrief.model_validate(project.brief_json or {})
+            reference = (
+                ReferenceContext.model_validate(project.reference_snapshot_json)
+                if project.reference_snapshot_json
+                else None
+            )
+            _update_project(db, project, status="running", step="planning", progress=0.15)
+            gateway = LLMGateway(settings)
+
+            def generate_attempt() -> tuple[PromptPlan, list[str]]:
+                """Generate and normalize one candidate plan for a retry attempt."""
+                candidate, attempt_notes = generate_prompt_plan(
+                    brief, gateway, reference
+                )
+                _update_project(db, project, step="validating", progress=0.85)
+                candidate = normalize_prompt_plan(
+                    candidate,
+                    brief,
+                    reference=reference,
+                    catalog_path=settings.prompt_catalog_file,
+                )
+                return candidate, attempt_notes
+
+            def on_retry(attempt: int, exc: BaseException, delay: float) -> None:
+                """Persist retry state so the UI can show transient failures."""
+                db.rollback()
+                logger.warning(
+                    "retrying prompt generation project=%s attempt=%s delay=%.2fs",
+                    project_id,
+                    attempt,
+                    delay,
+                )
+                project.step = "retrying"
+                project.progress = 0.1
+                project.error = redact_exception(exc, settings, limit=500)
                 project.updated_at = datetime.now(timezone.utc)
                 db.commit()
-                return
+
             try:
-                db.refresh(project)
-                if project.status == "cancelled":
-                    return
-                brief = PromptBrief.model_validate(project.brief_json or {})
-                reference = (
-                    ReferenceContext.model_validate(project.reference_snapshot_json)
-                    if project.reference_snapshot_json
-                    else None
-                )
-                _update_project(db, project, status="running", step="planning", progress=0.15)
-                gateway = LLMGateway(settings)
-
-                def generate_attempt() -> tuple[PromptPlan, list[str]]:
-                    """Generate and normalize one candidate plan for a retry attempt."""
-                    candidate, attempt_notes = generate_prompt_plan(
-                        brief, gateway, reference
-                    )
-                    _update_project(db, project, step="validating", progress=0.85)
-                    candidate = normalize_prompt_plan(
-                        candidate,
-                        brief,
-                        reference=reference,
-                        catalog_path=settings.prompt_catalog_file,
-                    )
-                    return candidate, attempt_notes
-
-                def on_retry(attempt: int, exc: BaseException, delay: float) -> None:
-                    """Persist retry state so the UI can show transient failures."""
-                    db.rollback()
-                    logger.warning(
-                        "retrying prompt generation project=%s attempt=%s delay=%.2fs",
-                        project_id,
-                        attempt,
-                        delay,
-                    )
-                    project.step = "retrying"
-                    project.progress = 0.1
-                    project.error = redact_exception(exc, settings, limit=500)
-                    project.updated_at = datetime.now(timezone.utc)
-                    db.commit()
-
                 plan, notes = retry_call(
                     generate_attempt,
                     attempts=settings.retry_max_attempts,
@@ -140,7 +152,11 @@ def run_prompt_generation(project_id: str, request_id: str | None = None) -> Non
 
                 project.title = plan.title or project.title
                 project.plan_json = plan.model_dump(mode="json")
-                project.metrics = {**gateway.stats(), "request_id": trace_id}
+                project.metrics = {
+                    **gateway.stats(),
+                    **gateway.execution_metadata(),
+                    "request_id": trace_id,
+                }
                 create_prompt_version(db, project, "generate")
                 _update_project(
                     db,
@@ -158,9 +174,9 @@ def run_prompt_generation(project_id: str, request_id: str | None = None) -> Non
                 project.error = redact_exception(exc, settings)
                 project.updated_at = datetime.now(timezone.utc)
                 db.commit()
-            finally:
-                capacity.release_job()
     finally:
+        if slot_held and not capacity.is_owned("prompt"):
+            capacity.release_job("prompt")
         request_id_ctx.reset(token)
 
 
@@ -208,6 +224,7 @@ def generate_prompt_plan(
         raise ValueError("结构化输出解析失败")
     except Exception as exc:
         logger.warning("structured prompt plan failed: %s", exc)
+        gateway.record_degradation("结构化提示词输出失败，改用 JSON 解析")
 
     try:
         chain = llm | JsonOutputParser()

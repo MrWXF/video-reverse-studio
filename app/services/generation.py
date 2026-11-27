@@ -201,13 +201,22 @@ def _mark_failed(
     db.commit()
 
 
-def run_generation_job(job_id: str, request_id: str | None = None) -> None:
+def run_generation_job(
+    job_id: str,
+    request_id: str | None = None,
+    *,
+    reserved: bool = False,
+) -> None:
     """Run one generation job sequentially and persist each shot."""
     settings = get_settings()
     trace_id = request_id or f"generation-{job_id}"
     token = request_id_ctx.set(trace_id)
-    try:
-        if not capacity.acquire_job(settings.max_active_generation_jobs):
+    slot_held = reserved or capacity.is_reserved("generation")
+    if not slot_held:
+        slot_held = capacity.acquire_job(
+            settings.max_active_generation_jobs, kind="generation"
+        )
+        if not slot_held:
             with SessionLocal() as db:
                 job = db.get(GenerationJob, job_id)
                 if job is not None and job.status not in TERMINAL_STATUSES:
@@ -216,7 +225,9 @@ def run_generation_job(job_id: str, request_id: str | None = None) -> None:
                         job,
                         "系统繁忙，当前同时视频生成任务已达上限，请稍后重试",
                     )
+            request_id_ctx.reset(token)
             return
+    try:
         try:
             with SessionLocal() as db:
                 job = db.get(GenerationJob, job_id)
@@ -356,7 +367,8 @@ def run_generation_job(job_id: str, request_id: str | None = None) -> None:
                     job.error = "所有镜头生成失败，请检查 Prompt 或平台配置"
                 db.commit()
         finally:
-            capacity.release_job()
+            if slot_held and not capacity.is_owned("generation"):
+                capacity.release_job("generation")
     except Exception as exc:
         logger.exception("generation job crashed: %s", job_id)
         with SessionLocal() as db:

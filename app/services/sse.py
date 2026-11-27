@@ -69,7 +69,7 @@ async def _stream(
         while True:
             if await request.is_disconnected():
                 return
-            payload = load_payload()
+            payload = await asyncio.to_thread(load_payload)
             if payload is None:
                 yield _event("error", {"detail": missing_detail})
                 return

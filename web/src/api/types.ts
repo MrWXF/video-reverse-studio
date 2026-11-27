@@ -1,12 +1,14 @@
 export type JobStatus = "uploaded" | "queued" | "running" | "done" | "failed" | "cancelled";
 
+export type MetricValue = number | string | boolean | null | string[];
+
 export interface Job {
   id: string;
   status: JobStatus;
   step: string;
   progress: number;
   error: string;
-  metrics: Record<string, number | string | boolean | null>;
+  metrics: Record<string, MetricValue>;
   updated_at: string | null;
 }
 
@@ -156,6 +158,116 @@ export interface UsageCost {
 
 export interface ProjectCost {
   project_id: string;
-  metrics: Record<string, number | string | boolean | null>;
+  metrics: Record<string, MetricValue>;
   cost: UsageCost;
+}
+
+export interface HealthStatus {
+  status: string;
+  llm_provider: string;
+  llm_enabled: boolean;
+  analysis_mode: "mock" | "live" | "degraded";
+  auth_enabled: boolean;
+  insecure_no_auth: boolean;
+  database: string;
+  ffmpeg: boolean;
+  ffprobe: boolean;
+  max_upload_mb: number;
+  active_jobs: number;
+  active_jobs_by_kind: Record<string, number>;
+  queue: Record<string, number>;
+}
+
+export interface PromptShot {
+  index: number;
+  start_s: number;
+  end_s: number;
+  duration: number;
+  shot_type: string;
+  camera_movement: string;
+  subject: string;
+  action: string;
+  scene: string;
+  lighting: string;
+  color_palette: string[];
+  prompt: string;
+  negative_prompt: string;
+  transition: string;
+  remake_notes: string;
+  source_shot_index: number | null;
+  locked_fields: string[];
+}
+
+export interface PromptPlan {
+  title: string;
+  summary: string;
+  target_model: string;
+  language: string;
+  duration_s: number;
+  aspect_ratio: string;
+  global_style: string;
+  shots: PromptShot[];
+  assumptions: string[];
+  warnings: string[];
+}
+
+export interface PromptBrief {
+  title: string;
+  idea: string;
+  target_model: string;
+  language: "en" | "zh";
+  duration_s: number;
+  aspect_ratio: string;
+  shot_count: number;
+  style: string;
+  mood: string;
+  audience: string;
+  negative_prompt: string;
+  constraints: string[];
+  reference_project_id: string | null;
+  reference_mode: "style" | "structure" | "full";
+}
+
+export interface PromptProject {
+  id: string;
+  title: string;
+  status: JobStatus;
+  step: string;
+  progress: number;
+  error: string;
+  metrics: Record<string, MetricValue>;
+  target_model: string;
+  shot_count: number;
+  brief: Partial<PromptBrief>;
+  version_count: number;
+  source_project_id: string | null;
+  reference_mode: string;
+  export_url: string;
+  created_at: string | null;
+  updated_at: string | null;
+  plan?: PromptPlan;
+}
+
+export interface GenerationShotResult {
+  shot_index: number;
+  status: string;
+  download_url: string;
+  media_type: string;
+  error: string;
+  warnings: string[];
+}
+
+export interface GenerationJob {
+  id: string;
+  prompt_project_id: string;
+  provider: string;
+  model: string;
+  status: string;
+  step: string;
+  progress: number;
+  error: string;
+  shot_indices: number[];
+  result: { provider: string; shots: GenerationShotResult[] };
+  created_at: string | null;
+  updated_at: string | null;
 }

@@ -40,21 +40,33 @@ def _update_review(
     db.commit()
 
 
-def run_delivery_review(review_id: str, request_id: str | None = None) -> None:
+def run_delivery_review(
+    review_id: str,
+    request_id: str | None = None,
+    *,
+    reserved: bool = False,
+) -> None:
     """Evaluate a delivered video against its prompt plan."""
     settings = get_settings()
     token = request_id_ctx.set(request_id or f"review-{review_id}")
+    slot_held = reserved or capacity.is_reserved("review")
+    if not slot_held:
+        slot_held = capacity.acquire_job(settings.max_active_jobs, kind="review")
+        if not slot_held:
+            with SessionLocal() as db:
+                review = db.get(DeliveryReview, review_id)
+                if review is not None:
+                    review.status = "failed"
+                    review.step = "failed"
+                    review.error = "系统繁忙，当前回测任务已达并发上限，请稍后重试"
+                    review.updated_at = datetime.now(timezone.utc)
+                    db.commit()
+            request_id_ctx.reset(token)
+            return
     try:
         with SessionLocal() as db:
             review = db.get(DeliveryReview, review_id)
             if review is None:
-                return
-            if not capacity.acquire_job(settings.max_active_jobs):
-                review.status = "failed"
-                review.step = "failed"
-                review.error = "系统繁忙，当前回测任务已达并发上限，请稍后重试"
-                review.updated_at = datetime.now(timezone.utc)
-                db.commit()
                 return
             try:
                 project = db.get(PromptProject, review.prompt_project_id)
@@ -89,9 +101,9 @@ def run_delivery_review(review_id: str, request_id: str | None = None) -> None:
                 review.error = redact_exception(exc, settings)
                 review.updated_at = datetime.now(timezone.utc)
                 db.commit()
-            finally:
-                capacity.release_job()
     finally:
+        if slot_held and not capacity.is_owned("review"):
+            capacity.release_job("review")
         request_id_ctx.reset(token)
 
 

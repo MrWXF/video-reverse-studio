@@ -6,10 +6,10 @@ from collections import Counter, defaultdict
 from datetime import datetime, time, timedelta, timezone
 from statistics import fmean
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import Session
 
-from ..models import Job, Project, ShotEditEvent
+from ..models import Job, Project, Shot, ShotEditEvent
 
 FIELD_LABELS = {
     "origin": "来源判定",
@@ -75,11 +75,19 @@ def build_quality_dashboard(
     start_date = end_date - timedelta(days=days - 1)
     cutoff = datetime.combine(start_date, time.min, tzinfo=timezone.utc)
 
-    projects = db.scalars(
-        select(Project).options(selectinload(Project.shots))
+    events = db.scalars(
+        select(ShotEditEvent).where(ShotEditEvent.created_at >= cutoff)
     ).all()
-    jobs = db.scalars(select(Job)).all()
-    events = db.scalars(select(ShotEditEvent)).all()
+    jobs = db.scalars(
+        select(Job).where(Job.status == "done", Job.updated_at >= cutoff)
+    ).all()
+    active_ids = {event.project_id for event in events} | {
+        job.project_id for job in jobs
+    }
+    projects = db.scalars(
+        select(Project)
+        .where(or_(Project.created_at >= cutoff, Project.id.in_(active_ids)))
+    ).all()
 
     active_project_ids: set[str] = set()
     for project in projects:
@@ -104,7 +112,14 @@ def build_quality_dashboard(
             completed_jobs.append(job)
 
     scoped_projects = [project for project in projects if project.id in active_project_ids]
-    shot_counts = {project.id: len(project.shots or []) for project in scoped_projects}
+    shot_counts = {
+        project_id: int(count)
+        for project_id, count in db.execute(
+            select(Shot.project_id, func.count(Shot.id))
+            .where(Shot.project_id.in_(active_project_ids))
+            .group_by(Shot.project_id)
+        ).all()
+    }
     total_shots = sum(shot_counts.values())
     total_projects = len(scoped_projects)
 

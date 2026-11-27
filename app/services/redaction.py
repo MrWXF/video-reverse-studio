@@ -10,6 +10,7 @@ _SECRET_PATTERNS = (
     (re.compile(r"\bsk-[A-Za-z0-9_-]{8,}"), "sk-***"),
     (re.compile(r"(?i)(api[_-]?key\s*[=:]\s*)[^\s,;]+"), r"\1***"),
     (re.compile(r"(?i)(password\s*[=:]\s*)[^\s,;]+"), r"\1***"),
+    (re.compile(r"(?i)(/share/|/api/shares/)[A-Za-z0-9_-]+"), r"\1<token>"),
 )
 
 
@@ -38,7 +39,12 @@ def redact_text(
                 )
 
     if settings is not None:
-        for secret in (settings.llm_api_key, settings.asr_api_key, settings.app_password):
+        for secret in (
+            settings.llm_api_key,
+            settings.asr_api_key,
+            settings.video_api_key,
+            settings.app_password,
+        ):
             if secret:
                 text = text.replace(secret, "***")
 

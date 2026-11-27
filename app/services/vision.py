@@ -95,6 +95,7 @@ def analyze_shot(
         raise ValueError("结构化输出解析失败")
     except Exception as exc:
         logger.warning("structured output failed for shot %s: %s", index, exc)
+        gateway.record_degradation(f"镜头 {index} 结构化输出失败，改用 JSON 解析")
 
     try:
         chain = llm | JsonOutputParser()
@@ -107,6 +108,11 @@ def analyze_shot(
         return ShotAnalysis.model_validate(data)
     except Exception as exc:
         logger.error("vision analysis failed for shot %s: %s", index, exc)
+        gateway.record_degradation(
+            "镜头 "
+            f"{index} 模型调用失败，已回退 Mock："
+            + redact_exception(exc, gateway.settings, limit=120)
+        )
         fallback = mock_analysis(
             index,
             start_s,

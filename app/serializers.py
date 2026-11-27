@@ -52,6 +52,7 @@ def project_payload(
     job: Job | None = None,
     include_shots: bool = False,
     timeline_min_shot_seconds: float | None = None,
+    shot_count: int | None = None,
 ) -> dict:
     """Build a project summary, optionally embedding its ordered shots."""
     payload = {
@@ -63,7 +64,11 @@ def project_payload(
         "height": project.height,
         "fps": project.fps,
         "timeline_min_shot_seconds": timeline_min_shot_seconds,
-        "shot_count": len(project.shots) if project.shots else 0,
+        "shot_count": (
+            shot_count
+            if shot_count is not None
+            else (len(project.shots) if project.shots else 0)
+        ),
         "created_at": project.created_at.isoformat() if project.created_at else None,
         "video_url": f"/api/projects/{project.id}/video",
         "recipe_url": f"/api/projects/{project.id}/recipe",
@@ -77,6 +82,7 @@ def project_payload(
 def prompt_project_payload(
     project: PromptProject,
     include_plan: bool = False,
+    version_count: int | None = None,
 ) -> dict:
     """Serialize prompt metadata and optionally reveal the full plan and reference recipe."""
     brief = project.brief_json or {}
@@ -112,7 +118,7 @@ def prompt_project_payload(
         "shot_count": len(plan.get("shots") or []),
         "brief": brief,
         "entity_bible": project.entity_bible_json or {},
-        "version_count": len(project.versions),
+        "version_count": version_count if version_count is not None else len(project.versions),
         "source_project_id": project.source_project_id,
         "reference_mode": project.reference_mode or "style",
         "reference": reference,

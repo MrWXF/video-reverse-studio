@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f2eee6" />
+    <title>ReelReverse · 移动端设计稿</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body class="mobile-screen">
+    <div class="mobile-shell">
+      <header class="topbar">
+        <a class="brand" href="home.html" aria-label="ReelReverse 工作台">
+          <span class="brand-mark" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="4"/><path d="M8 4v16M16 4v16M3 9h5M16 9h5M3 15h5M16 15h5"/></svg>
+          </span>
+          <span class="brand-copy"><strong>ReelReverse</strong><small>AI VIDEO STUDIO</small></span>
+        </a>
+        <div class="topbar-actions"><span class="avatar" aria-label="当前用户">LR</span></div>
+      </header>
+
+      <main class="mobile-page">
+        <section class="home-hero">
+          <p class="eyebrow">NEW ANALYSIS / 01</p>
+          <h1>上传参考视频，<br /><em>剩下的交给 AI。</em></h1>
+          <p>拆镜头、看节奏、写提示词，一次完成。</p>
+        </section>
+
+        <section class="card start-card">
+          <div class="start-card-head">
+            <div><span class="step-badge">Step 01 · 新建分析</span><h2>从一段视频开始</h2><p>支持 3–30 秒短片</p></div>
+            <span class="limit-note">MAX 500 MB</span>
+          </div>
+          <button class="upload-zone" type="button">
+            <span class="upload-zone-inner">
+              <span class="upload-icon"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg></span>
+              <strong>拖入视频，或点击选择</strong>
+              <p>MP4 · MOV · WEBM</p>
+              <span class="upload-hint">选择视频文件 →</span>
+            </span>
+          </button>
+          <div class="start-form">
+            <div class="input-shell">项目名称（可选）</div>
+            <button class="btn btn-primary" type="button">开始分析 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+          </div>
+          <div class="start-foot"><span>预计 2–4 分钟，可离开页面</span><span>自动保存</span></div>
+        </section>
+
+        <section class="home-side">
+          <div class="card continue-card">
+            <div class="continue-kicker"><span>CONTINUE</span><span>87s · 24 shots</span></div>
+            <div class="continue-thumb"><span class="thumb-label">01:27</span></div>
+            <h2>咖啡品牌广告参考</h2>
+            <p>24 个镜头 · 刚刚更新</p>
+            <a class="btn" href="workspace.html">打开项目 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+          </div>
+          <div class="card recent-card">
+            <div class="panel-head"><div><h2 class="section-title">最近项目</h2><p class="section-copy">继续上一次的创作。</p></div><a href="workspace.html">全部</a></div>
+            <div class="project-list">
+              <a class="project-row" href="workspace.html"><span class="project-icon">▶</span><span><strong>夏日通勤人物短片</strong><small>18 镜头 · 42 秒</small></span><span class="status-badge">已完成</span></a>
+              <a class="project-row" href="workspace.html"><span class="project-icon">▶</span><span><strong>未来感品牌氛围片</strong><small>正在分析 · 12 秒</small></span><span class="status-badge is-running">分析中</span></a>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <nav class="mobile-nav" aria-label="移动端导航">
+      <a class="active" href="home.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h5"/></svg>工作台</a>
+      <a href="workspace.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M10 9l5 3-5 3z"/></svg>项目</a>
+      <a href="prompt-studio.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8z"/><path d="m19 16 .8 1.8L21.5 19l-1.7.8L19 21l-.8-1.2L16.5 19l1.7-1.2z"/></svg>提示词</a>
+      <a href="#quality"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 18V6M10 18V9M16 18v-3M22 18V4"/></svg>质量</a>
+    </nav>
+  </body>
+</html>

@@ -82,7 +82,13 @@ def _ordered_shots(db: Session, project_id: str) -> list[Shot]:
     )
 
 
-def _ensure_idle(db: Session, project: Project, settings: Settings) -> None:
+def _ensure_idle(
+    db: Session,
+    project: Project,
+    settings: Settings,
+    *,
+    capacity_reserved: bool = False,
+) -> None:
     """Reject mutations while a project job is active or capacity is unavailable."""
     if project.status in {"queued", "running"}:
         raise TimelineConflictError("项目正在分析，暂时不能编辑时间轴")
@@ -94,7 +100,7 @@ def _ensure_idle(db: Session, project: Project, settings: Settings) -> None:
     )
     if active is not None:
         raise TimelineConflictError("该项目已有活动任务，请等待完成后再编辑时间轴")
-    if not capacity.has_capacity(settings.max_active_jobs):
+    if not capacity_reserved and not capacity.has_capacity(settings.max_active_jobs):
         raise TimelineCapacityError("当前分析任务已达并发上限，请稍后重试")
 
 
@@ -173,13 +179,15 @@ def update_boundary(
     shot_id: int,
     boundary_s: float,
     settings: Settings,
+    *,
+    capacity_reserved: bool = False,
 ) -> TimelineMutation:
     """Move the boundary after one shot while preserving both minimum durations.
 
     The method writes a queued job and audit events, invalidates linked prompt
     mappings, and commits the transaction before returning.
     """
-    _ensure_idle(db, project, settings)
+    _ensure_idle(db, project, settings, capacity_reserved=capacity_reserved)
     shots = _ordered_shots(db, project.id)
     position = next((index for index, shot in enumerate(shots) if shot.id == shot_id), None)
     if position is None:
@@ -233,9 +241,11 @@ def split_shot(
     shot_id: int,
     split_at: float,
     settings: Settings,
+    *,
+    capacity_reserved: bool = False,
 ) -> TimelineMutation:
     """Split a shot into two ordered shots and queue targeted re-analysis."""
-    _ensure_idle(db, project, settings)
+    _ensure_idle(db, project, settings, capacity_reserved=capacity_reserved)
     shots = _ordered_shots(db, project.id)
     shot = next((item for item in shots if item.id == shot_id), None)
     if shot is None:
@@ -297,9 +307,11 @@ def merge_shots(
     project: Project,
     shot_ids: list[int],
     settings: Settings,
+    *,
+    capacity_reserved: bool = False,
 ) -> TimelineMutation:
     """Merge two adjacent shots, reindex the remainder, and queue re-analysis."""
-    _ensure_idle(db, project, settings)
+    _ensure_idle(db, project, settings, capacity_reserved=capacity_reserved)
     unique_ids = list(dict.fromkeys(int(item) for item in shot_ids))
     if len(unique_ids) != 2:
         raise TimelineValidationError("一次只能合并两个不同的相邻镜头")
@@ -349,9 +361,11 @@ def queue_reanalysis(
     project: Project,
     shot_id: int,
     settings: Settings,
+    *,
+    capacity_reserved: bool = False,
 ) -> TimelineMutation:
     """Queue keyframe and vision re-analysis for one existing shot."""
-    _ensure_idle(db, project, settings)
+    _ensure_idle(db, project, settings, capacity_reserved=capacity_reserved)
     shot = db.scalar(
         select(Shot).where(Shot.id == shot_id, Shot.project_id == project.id)
     )
@@ -400,10 +414,10 @@ def _align_transcripts(
     source: Path,
     ffmpeg: str,
     settings: Settings,
-) -> None:
+) -> str:
     """Best-effort transcribe the source and attach overlapping text to each shot."""
     if settings.asr_provider.lower().strip() in ("", "none"):
-        return
+        return "disabled"
     root = project_dir(project.id, settings)
     audio_path = root / "audio.wav"
     try:
@@ -411,12 +425,13 @@ def _align_transcripts(
         transcripts = asr.transcribe(audio_path, settings)
     except Exception as exc:
         logger.warning("timeline ASR skipped: %s", exc)
-        return
+        return "failed"
     for shot in shots:
         shot.transcript = fusion.attach_transcript(
             transcripts, shot.start_s, shot.end_s
         )
     db.commit()
+    return "ok"
 
 
 def _execute_timeline(
@@ -452,7 +467,7 @@ def _execute_timeline(
     _check_cancelled(db, job)
 
     _update_job(db, job, step="timeline_transcribing", progress=0.08)
-    _align_transcripts(db, project, shots, source, ffmpeg, settings)
+    asr_status = _align_transcripts(db, project, shots, source, ffmpeg, settings)
     _check_cancelled(db, job)
 
     _update_job(db, job, step="timeline_extracting", progress=0.12)
@@ -500,6 +515,7 @@ def _execute_timeline(
     job.metrics = {
         **(job.metrics or {}),
         **gateway.stats(),
+        **gateway.execution_metadata(asr_status=asr_status),
         "request_id": current_request_id(),
     }
     _update_job(db, job, status="done", step="done", progress=1.0, error="")
@@ -507,48 +523,63 @@ def _execute_timeline(
     db.commit()
 
 
-def run_timeline_reanalysis(project_id: str, job_id: str, shot_ids: list[int]) -> None:
+def run_timeline_reanalysis(
+    project_id: str,
+    job_id: str,
+    shot_ids: list[int],
+    *,
+    reserved: bool = False,
+) -> None:
     """Re-extract frames and analyze only the affected shots."""
     settings = get_settings()
     request_id_ctx.set(f"timeline-{job_id}")
-    with SessionLocal() as db:
-        project = db.get(Project, project_id)
-        job = db.get(Job, job_id)
-        if project is None or job is None:
-            logger.error("timeline project or job missing: %s / %s", project_id, job_id)
+    slot_held = reserved or capacity.is_reserved("analysis")
+    if not slot_held:
+        slot_held = capacity.acquire_job(settings.max_active_jobs, kind="analysis")
+        if not slot_held:
+            with SessionLocal() as db:
+                project = db.get(Project, project_id)
+                job = db.get(Job, job_id)
+                if project is not None and job is not None:
+                    job.status = "failed"
+                    job.step = "failed"
+                    job.error = "系统繁忙，当前分析任务已达并发上限，请稍后重试"
+                    job.updated_at = datetime.now(timezone.utc)
+                    project.status = "failed"
+                    db.commit()
             return
-        if not capacity.acquire_job(settings.max_active_jobs):
-            job.status = "failed"
-            job.step = "failed"
-            job.error = "系统繁忙，当前分析任务已达并发上限，请稍后重试"
-            job.updated_at = datetime.now(timezone.utc)
-            project.status = "failed"
-            db.commit()
-            return
-        try:
-            _execute_timeline(db, project, job, shot_ids, settings)
-        except TimelineCancelled:
-            db.rollback()
+    try:
+        with SessionLocal() as db:
             project = db.get(Project, project_id)
             job = db.get(Job, job_id)
-            if project is not None and job is not None:
-                project.status = "cancelled"
-                job.status = "cancelled"
-                job.step = "cancelled"
-                job.error = "用户已取消任务"
-                job.updated_at = datetime.now(timezone.utc)
-                db.commit()
-        except Exception as exc:
-            db.rollback()
-            project = db.get(Project, project_id)
-            job = db.get(Job, job_id)
-            logger.exception("timeline reanalysis failed project=%s", project_id)
-            if project is not None and job is not None:
-                project.status = "failed"
-                job.status = "failed"
-                job.step = "failed"
-                job.error = redact_exception(exc, settings, limit=500)
-                job.updated_at = datetime.now(timezone.utc)
-                db.commit()
-        finally:
-            capacity.release_job()
+            if project is None or job is None:
+                logger.error("timeline project or job missing: %s / %s", project_id, job_id)
+                return
+            try:
+                _execute_timeline(db, project, job, shot_ids, settings)
+            except TimelineCancelled:
+                db.rollback()
+                project = db.get(Project, project_id)
+                job = db.get(Job, job_id)
+                if project is not None and job is not None:
+                    project.status = "cancelled"
+                    job.status = "cancelled"
+                    job.step = "cancelled"
+                    job.error = "用户已取消任务"
+                    job.updated_at = datetime.now(timezone.utc)
+                    db.commit()
+            except Exception as exc:
+                db.rollback()
+                project = db.get(Project, project_id)
+                job = db.get(Job, job_id)
+                logger.exception("timeline reanalysis failed project=%s", project_id)
+                if project is not None and job is not None:
+                    project.status = "failed"
+                    job.status = "failed"
+                    job.step = "failed"
+                    job.error = redact_exception(exc, settings, limit=500)
+                    job.updated_at = datetime.now(timezone.utc)
+                    db.commit()
+    finally:
+        if slot_held and not capacity.is_owned("analysis"):
+            capacity.release_job("analysis")

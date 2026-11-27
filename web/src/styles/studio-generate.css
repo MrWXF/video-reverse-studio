@@ -1,0 +1,314 @@
+.prompt-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.prompt-stats span {
+  display: inline-flex;
+  min-height: 31px;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  font-size: 10.5px;
+}
+
+.prompt-stats svg {
+  color: var(--accent);
+}
+
+.generate-layout {
+  display: grid;
+  grid-template-columns: minmax(340px, 410px) minmax(0, 1fr);
+  align-items: start;
+  gap: 20px;
+}
+
+.generate-side {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.generate-main {
+  min-width: 0;
+}
+
+.brief-card {
+  padding: 22px;
+  scroll-margin-top: 20px;
+}
+
+.brief-card > .surface-heading {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.form-section {
+  display: grid;
+  gap: 13px;
+  margin: 0;
+  padding: 15px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.form-section legend {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 750;
+}
+
+.form-section legend span {
+  display: grid;
+  width: 21px;
+  height: 21px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.studio-shell .brief-idea-input {
+  min-height: 142px;
+  line-height: 1.65;
+}
+
+.template-picker {
+  display: grid;
+  gap: 6px;
+}
+
+.template-picker > span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.template-picker > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.template-picker button {
+  min-height: 27px;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--control-bg);
+  font-size: 10px;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+
+.template-picker button:hover {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+
+.advanced-settings {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.advanced-settings > summary {
+  display: flex;
+  min-height: 39px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 680;
+  list-style: none;
+  cursor: pointer;
+}
+
+.advanced-settings > summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-settings[open] > summary {
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+}
+
+.advanced-settings[open] > summary svg {
+  transform: rotate(180deg);
+}
+
+.advanced-settings-body {
+  display: grid;
+  gap: 12px;
+  padding: 13px;
+}
+
+.brief-submit-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 10px;
+  padding: 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line));
+  border-radius: 10px;
+  color: var(--muted);
+  background: var(--accent-soft);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.brief-submit-summary svg,
+.brief-submit-summary strong {
+  color: var(--accent-ink);
+}
+
+.prompt-library-card {
+  padding: 20px;
+}
+
+.prompt-library-card > .surface-heading {
+  margin-bottom: 11px;
+}
+
+.prompt-library-list {
+  display: grid;
+  gap: 5px;
+  max-height: 330px;
+  margin-top: 10px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.prompt-library-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 9px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.prompt-library-row:hover {
+  border-color: var(--line);
+  background: var(--surface-soft);
+}
+
+.prompt-library-row.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
+  background: var(--accent-soft);
+}
+
+.prompt-library-icon {
+  display: grid;
+  width: 31px;
+  height: 31px;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--accent-ink);
+  background: var(--control-bg);
+}
+
+.prompt-library-row.is-selected .prompt-library-icon {
+  color: var(--on-accent);
+  background: var(--accent);
+}
+
+.prompt-library-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.prompt-library-copy strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 11.5px;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-library-copy small {
+  color: var(--muted);
+  font-size: 9.5px;
+}
+
+.prompt-library-row .ui-status {
+  min-height: 20px;
+  padding: 2px 6px;
+  font-size: 8px;
+}
+
+.prompt-empty-card {
+  display: flex;
+  min-height: 560px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 34px;
+  text-align: center;
+}
+
+.prompt-empty-card h2 {
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: clamp(24px, 2.7vw, 34px);
+  font-weight: 760;
+  letter-spacing: -0.045em;
+}
+
+.prompt-empty-card > p {
+  max-width: 480px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.prompt-empty-illustration {
+  display: grid;
+  width: 70px;
+  height: 70px;
+  margin-bottom: 5px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius: 22px;
+  color: var(--accent-ink);
+  background:
+    radial-gradient(circle at 35% 25%, color-mix(in srgb, var(--accent-2) 24%, transparent), transparent 55%),
+    var(--accent-soft);
+  box-shadow: 0 18px 38px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.prompt-empty-card .workflow-steps {
+  width: min(100%, 430px);
+}

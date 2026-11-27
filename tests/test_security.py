@@ -38,13 +38,26 @@ def test_verify_basic_auth():
     assert not verify_basic_auth("", "admin", "secret")
 
 
-def test_auth_disabled_allows_requests(monkeypatch):
+def test_auth_disabled_allows_requests_with_explicit_opt_out(monkeypatch):
     monkeypatch.delenv("APP_PASSWORD", raising=False)
+    monkeypatch.setenv("ALLOW_INSECURE_NO_AUTH", "true")
     get_settings.cache_clear()
     client = TestClient(app)
 
     assert client.get("/").status_code == 200
     assert client.get("/files/app.db").status_code == 404
+
+
+def test_missing_password_fails_closed_by_default(monkeypatch):
+    monkeypatch.delenv("APP_PASSWORD", raising=False)
+    monkeypatch.setenv("ALLOW_INSECURE_NO_AUTH", "false")
+    get_settings.cache_clear()
+    client = TestClient(app)
+
+    blocked = client.get("/api/projects")
+    assert blocked.status_code == 503
+    assert "APP_PASSWORD" in blocked.text
+    assert client.get("/healthz").status_code == 200
 
 
 def test_auth_enabled_protects_app_and_business_api(monkeypatch):
@@ -61,3 +74,18 @@ def test_auth_enabled_protects_app_and_business_api(monkeypatch):
     assert client.get("/", auth=("alice", "secret")).status_code == 200
     assert client.get("/healthz").status_code == 200
     assert client.get("/api/projects").status_code == 401
+
+
+def test_repeated_auth_failures_are_throttled(monkeypatch):
+    monkeypatch.setenv("APP_USERNAME", "alice")
+    monkeypatch.setenv("APP_PASSWORD", "secret")
+    monkeypatch.setenv("AUTH_MAX_FAILURES", "2")
+    monkeypatch.setenv("AUTH_FAILURE_WINDOW_S", "60")
+    get_settings.cache_clear()
+    client = TestClient(app)
+
+    assert client.get("/", auth=("alice", "wrong")).status_code == 401
+    assert client.get("/", auth=("alice", "wrong")).status_code == 401
+    blocked = client.get("/", auth=("alice", "secret"))
+    assert blocked.status_code == 429
+    assert int(blocked.headers["retry-after"]) >= 1

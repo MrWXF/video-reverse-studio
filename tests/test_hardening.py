@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings, get_settings
 from app.main import app
+from app.observability import safe_log_path
 from app.services import capacity, sse
 from app.services.redaction import redact_text
 from app.services.retry import RetryableServiceError, retry_call
@@ -127,6 +128,20 @@ def test_capacity_rejects_over_limit_and_releases_cleanly():
     assert capacity.has_capacity(1)
 
 
+def test_capacity_is_isolated_per_workload():
+    capacity.reset_for_tests()
+    assert capacity.reserve("analysis", 1)
+    assert capacity.reserve("generation", 1)
+
+    assert not capacity.has_capacity(1, "analysis")
+    assert not capacity.has_capacity(1, "generation")
+    assert capacity.has_capacity(1, "prompt")
+
+    capacity.release_job("analysis")
+    capacity.release_job("generation")
+    assert capacity.active_jobs() == 0
+
+
 def test_sse_connection_limit_is_bounded():
     sse.reset_for_tests()
     assert sse._acquire_stream(1)
@@ -183,6 +198,8 @@ def test_request_trace_version_alias_and_static_cache_headers(monkeypatch):
         assert health.status_code == 200
         assert health.headers["x-request-id"] == "trace-test-1"
         assert health.headers["x-api-version"] == "v1"
+        assert health.headers["x-frame-options"] == "DENY"
+        assert health.headers["referrer-policy"] == "no-referrer"
 
         versioned = client.get("/api/v1/model-profiles")
         assert versioned.status_code == 200
@@ -190,10 +207,24 @@ def test_request_trace_version_alias_and_static_cache_headers(monkeypatch):
 
         openapi = client.get("/openapi.json")
         assert openapi.status_code == 200
-        assert "/api/v1/projects" in openapi.json()["paths"]
+        schema = openapi.json()
+        assert "/api/v1/projects" in schema["paths"]
+        assert "BasicAuth" in schema["components"]["securitySchemes"]
+        assert schema["paths"]["/api/projects"]["get"]["security"] == [{"BasicAuth": []}]
+        assert "security" not in schema["paths"]["/api/shares/{token}"]["get"]
 
         static = client.get("/static/style.css")
         assert static.status_code == 200
         assert "max-age=3600" in static.headers["cache-control"]
     finally:
         get_settings.cache_clear()
+
+
+def test_share_tokens_are_hidden_from_log_paths_and_errors():
+    assert safe_log_path("/share/secret-token") == "/share/<token>"
+    assert safe_log_path("/api/shares/secret-token/comments") == (
+        "/api/shares/<token>/comments"
+    )
+    text = redact_text("failed for /api/shares/secret-token and /share/other-token")
+    assert "secret-token" not in text
+    assert "other-token" not in text

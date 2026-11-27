@@ -1,12 +1,13 @@
-import { Link } from "react-router-dom";
+﻿import { Link } from "react-router-dom";
 
 import { fetchQuality } from "../../api/endpoints";
 import type { QualityDashboard, QualityField, QualityTrendPoint } from "../../api/types";
+import { PageHeader } from "../../components/PageHeader";
 import { useApiQuery } from "../../hooks/useApiQuery";
 
 function formatPercent(value: number | null): string {
   if (value === null || !Number.isFinite(value)) {
-    return "—";
+    return "暂无";
   }
   return `${(value * 100).toFixed(1)}%`;
 }
@@ -50,7 +51,7 @@ function Kpis({ data }: { data: QualityDashboard }) {
         label="来源判定准确率"
         value={formatPercent(summary.origin_accuracy)}
         detail={`${summary.origin_corrections} 镜发生来源修正 · 基于人工编辑`}
-        tone={summary.origin_accuracy !== null && summary.origin_accuracy < 0.85 ? "is-warning" : "is-good"}
+        tone={summary.origin_accuracy === null ? undefined : summary.origin_accuracy < 0.85 ? "is-warning" : "is-good"}
       />
       <KpiCard
         label="镜头修正率"
@@ -223,26 +224,22 @@ export function QualityPage() {
   const data = query.data;
 
   return (
-    <section className="quality-page">
-      <header className="quality-hero">
-        <div className="quality-hero-copy">
-          <p className="eyebrow">QUALITY INTELLIGENCE / 03</p>
-          <h1>
-            让每一次修正，<br />
-            <span className="gradient-text">变成下一次判断。</span>
-          </h1>
-          <p className="hero-description">
-            把人工修正、处理耗时和 token 消耗汇总成可读的质量信号。它不宣称模型百分之百准确，而是帮助团队发现最值得优化的镜头字段和工作环节。
-          </p>
-          <div className="hero-actions">
-            <button className="btn btn-primary" type="button" onClick={query.refresh} disabled={query.loading}>
-              {query.loading ? "正在刷新…" : "刷新质量数据"} <span className="arrow" aria-hidden="true">↻</span>
-            </button>
-            <Link className="btn btn-secondary" to="/reverse">返回视频分析</Link>
-          </div>
-        </div>
-        <aside className="quality-hero-card">
-          <p className="panel-kicker">QUALITY SIGNAL</p>
+    <section className="rr-page rr-quality-page">
+      <PageHeader
+        eyebrow="QUALITY INSIGHT"
+        title="用真实修正数据，找到最该优化的环节"
+        description="汇总人工修正、处理耗时和 Token 消耗，快速判断哪些镜头字段最需要改进，以及下一轮应该优先处理什么。"
+        actions={<>
+          <button className="btn btn-primary" type="button" onClick={query.refresh} disabled={query.loading}>
+            {query.loading ? "正在刷新…" : "刷新质量数据"}
+          </button>
+          <Link className="btn btn-secondary" to="/reverse">返回视频分析</Link>
+        </>}
+      />
+
+      <div className="quality-signal-bar" aria-live="polite">
+        <span className="quality-live"><i aria-hidden="true" /><span>EDIT EVENT SIGNAL</span></span>
+        <div>
           <strong>{data ? `近 ${data.window.days} 天` : "近 30 天"}</strong>
           <p>
             {data
@@ -251,9 +248,8 @@ export function QualityPage() {
                 ? "正在读取质量数据…"
                 : "质量数据暂不可用"}
           </p>
-          <div className="quality-live"><i aria-hidden="true" /><span>EDIT EVENT SIGNAL</span></div>
-        </aside>
-      </header>
+        </div>
+      </div>
 
       {query.error ? (
         <section className="panel react-message-panel">

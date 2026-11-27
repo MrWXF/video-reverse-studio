@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f2eee6" />
+    <title>ReelReverse · 项目工作台设计稿</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body class="screen">
+    <div class="app">
+      <header class="topbar">
+        <a class="brand" href="home.html" aria-label="ReelReverse 工作台">
+          <span class="brand-mark" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="4"/><path d="M8 4v16M16 4v16M3 9h5M16 9h5M3 15h5M16 15h5"/></svg>
+          </span>
+          <span class="brand-copy"><strong>ReelReverse</strong><small>AI VIDEO STUDIO</small></span>
+        </a>
+        <nav class="mainnav" aria-label="主导航">
+          <a class="active" href="home.html">工作台</a>
+          <a href="prompt-studio.html">提示词</a>
+          <a href="workspace.html">项目</a>
+          <a href="#quality">质量</a>
+        </nav>
+        <div class="topbar-actions">
+          <span class="status-pill"><i class="status-dot" aria-hidden="true"></i>服务在线</span>
+          <button class="icon-button" type="button" aria-label="帮助">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9a2.5 2.5 0 1 1 4 2c-.9.7-1.6 1.2-1.6 2.4M12 17h.01"/></svg>
+          </button>
+          <button class="btn btn-primary" type="button">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            新建分析
+          </button>
+          <span class="avatar" aria-label="当前用户">LR</span>
+        </div>
+      </header>
+
+      <main class="page workspace-page">
+        <nav class="crumbs" aria-label="面包屑">
+          <a href="home.html">工作台</a>
+          <span>/</span>
+          <span>咖啡品牌广告参考</span>
+        </nav>
+
+        <section class="project-head" aria-labelledby="project-title">
+          <div>
+            <h1 id="project-title">咖啡品牌广告参考</h1>
+            <div class="project-meta">
+              <span class="status-badge">已完成</span>
+              <span>24 个镜头</span><i class="divider" aria-hidden="true"></i>
+              <span>87 秒</span><i class="divider" aria-hidden="true"></i>
+              <span>1280 × 720</span><i class="divider" aria-hidden="true"></i>
+              <span>今天 14:32 更新</span>
+            </div>
+          </div>
+          <div class="project-actions">
+            <button class="btn btn-secondary" type="button">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+              导出
+            </button>
+            <a class="btn btn-primary" href="prompt-studio.html">
+              生成提示词
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </a>
+          </div>
+        </section>
+
+        <nav class="workspace-tabs" aria-label="项目视图">
+          <a href="#overview">概览</a>
+          <a class="active" href="#shots">镜头</a>
+          <a href="prompt-studio.html">提示词</a>
+          <a href="#quality">质量</a>
+        </nav>
+
+        <div class="workspace-grid">
+          <div>
+            <section class="card player-card" aria-label="视频预览与镜头时间轴">
+              <div class="video-stage">
+                <div class="video-topline"><span>ORIGINAL VIDEO</span><span>01:27 / 01:27</span></div>
+                <button class="play-button" type="button" aria-label="播放视频">
+                  <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor"><path d="m9 7 8 5-8 5z"/></svg>
+                </button>
+                <div class="video-controls">
+                  <div class="timeline" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+                  <div class="controls-row"><span>00:18.4</span><span><span>CC</span><span>HD</span><span>⛶</span></span></div>
+                </div>
+              </div>
+              <div class="thumbnail-row" aria-label="镜头缩略图">
+                <button class="shot-thumb" data-time="00:00" type="button" aria-label="镜头 1"></button>
+                <button class="shot-thumb" data-time="00:08" type="button" aria-label="镜头 2"></button>
+                <button class="shot-thumb active" data-time="00:18" type="button" aria-label="镜头 3，当前选中"></button>
+                <button class="shot-thumb" data-time="00:24" type="button" aria-label="镜头 4"></button>
+                <button class="shot-thumb" data-time="00:31" type="button" aria-label="镜头 5"></button>
+                <button class="shot-thumb" data-time="00:39" type="button" aria-label="镜头 6"></button>
+              </div>
+            </section>
+
+            <section class="card shot-detail" aria-labelledby="shot-title">
+              <div>
+                <p class="eyebrow">SHOT 03 / 00:18–00:24</p>
+                <h2 id="shot-title">手冲咖啡的特写推镜</h2>
+                <p>镜头从中景缓慢推近手冲壶，热水注入时的蒸汽被侧逆光勾亮。画面稳定，保留环境声，用细节建立产品的质感与温度。</p>
+                <div class="tag-row">
+                  <span class="tag">特写</span><span class="tag">慢推</span><span class="tag">侧逆光</span><span class="tag">暖色调</span><span class="tag">环境声</span>
+                </div>
+              </div>
+              <div class="shot-stats">
+                <div><strong>6.0s</strong><span>时长</span></div>
+                <div><strong>35mm</strong><span>焦段建议</span></div>
+                <div><strong>中慢</strong><span>节奏</span></div>
+              </div>
+            </section>
+          </div>
+
+          <aside class="workspace-side">
+            <section class="card summary-card" aria-labelledby="summary-title">
+              <p class="eyebrow">AI SUMMARY</p>
+              <h2 id="summary-title">这条片子为什么有效</h2>
+              <div class="summary-list">
+                <div class="summary-item">
+                  <i aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 18V6M10 18V9M16 18v-3M22 18V4"/></svg></i>
+                  <div><strong>节奏：慢开场，中段加速</strong><span>前 20 秒平均镜头 5.8 秒，建立氛围；后段缩短到 2.4 秒。</span></div>
+                </div>
+                <div class="summary-item">
+                  <i aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><path d="M12 5v7l4 3"/></svg></i>
+                  <div><strong>视觉：暖光与低饱和背景</strong><span>用木色、米白和深棕构成稳定三角，橙色高光只落在产品上。</span></div>
+                </div>
+                <div class="summary-item">
+                  <i aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></i>
+                  <div><strong>叙述：先细节，后品牌</strong><span>前 3/4 不出现完整包装，结尾才用品牌标识完成记忆锚点。</span></div>
+                </div>
+              </div>
+              <a class="btn btn-dark" href="prompt-studio.html">用这套结构生成新方案 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+            </section>
+
+            <section class="card shot-index" aria-labelledby="index-title">
+              <div class="shot-index-head"><h2 id="index-title">全部镜头</h2><span>24 SHOTS</span></div>
+              <div class="index-list">
+                <a class="index-row" href="#shot-1"><span class="index-poster"></span><span class="index-copy"><strong>咖啡豆落入磨豆机</strong><small>00:00–00:05</small></span><span>01</span></a>
+                <a class="index-row" href="#shot-2"><span class="index-poster"></span><span class="index-copy"><strong>磨豆机特写</strong><small>00:05–00:08</small></span><span>02</span></a>
+                <a class="index-row active" href="#shot-3"><span class="index-poster"></span><span class="index-copy"><strong>手冲壶注水</strong><small>00:18–00:24</small></span><span>03</span></a>
+                <a class="index-row" href="#shot-4"><span class="index-poster"></span><span class="index-copy"><strong>咖啡液滴落</strong><small>00:24–00:31</small></span><span>04</span></a>
+                <a class="index-row" href="#shot-5"><span class="index-poster"></span><span class="index-copy"><strong>人物端起杯子</strong><small>00:31–00:39</small></span><span>05</span></a>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

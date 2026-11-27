@@ -25,6 +25,8 @@ export function useApiQuery<T>(
 ): ApiQueryResult<T> {
   const loaderRef = useRef(loader);
   loaderRef.current = loader;
+  const dependencyKey = JSON.stringify(dependencies);
+  const previousDependencyKey = useRef(dependencyKey);
   const [revision, setRevision] = useState(0);
   const [state, setState] = useState<QueryState<T>>({
     data: null,
@@ -34,7 +36,13 @@ export function useApiQuery<T>(
 
   useEffect(() => {
     const controller = new AbortController();
-    setState((current) => ({ ...current, loading: true, error: null }));
+    const dependenciesChanged = previousDependencyKey.current !== dependencyKey;
+    previousDependencyKey.current = dependencyKey;
+    setState((current) => (
+      dependenciesChanged
+        ? { data: null, error: null, loading: true }
+        : { ...current, loading: true, error: null }
+    ));
 
     loaderRef.current(controller.signal)
       .then((data) => {

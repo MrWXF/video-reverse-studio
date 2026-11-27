@@ -60,11 +60,29 @@ def run_pipeline(
     project_id: str,
     job_id: str,
     request_id: str | None = None,
+    *,
+    reserved: bool = False,
 ) -> None:
     """Run the reverse-analysis job with admission control and retries."""
     settings = get_settings()
     trace_id = request_id or f"job-{job_id}"
     token = request_id_ctx.set(trace_id)
+    slot_held = reserved or capacity.is_reserved("analysis")
+    if not slot_held:
+        slot_held = capacity.acquire_job(settings.max_active_jobs, kind="analysis")
+        if not slot_held:
+            with SessionLocal() as db:
+                project = db.get(Project, project_id)
+                job = db.get(Job, job_id)
+                if project is not None and job is not None:
+                    project.status = "failed"
+                    job.status = "failed"
+                    job.step = "failed"
+                    job.error = "系统繁忙，当前并发分析任务已达上限，请稍后重试"
+                    job.updated_at = datetime.now(timezone.utc)
+                    db.commit()
+            request_id_ctx.reset(token)
+            return
     try:
         with SessionLocal() as db:
             project = db.get(Project, project_id)
@@ -72,76 +90,67 @@ def run_pipeline(
             if project is None or job is None:
                 logger.error("project or job missing: %s / %s", project_id, job_id)
                 return
-            if not capacity.acquire_job(settings.max_active_jobs):
-                project.status = "failed"
-                job.status = "failed"
-                job.step = "failed"
-                job.error = "系统繁忙，当前并发分析任务已达上限，请稍后重试"
-                job.updated_at = datetime.now(timezone.utc)
-                db.commit()
-                return
-            try:
-                attempt = 1
-                while True:
-                    try:
-                        _execute(db, project, job, settings)
+            attempt = 1
+            while True:
+                try:
+                    _execute(db, project, job, settings)
+                    break
+                except JobCancelled:
+                    db.rollback()
+                    project.status = "cancelled"
+                    job.status = "cancelled"
+                    job.step = "cancelled"
+                    job.error = "用户已取消任务"
+                    job.updated_at = datetime.now(timezone.utc)
+                    db.commit()
+                    break
+                except Exception as exc:
+                    db.rollback()
+                    project = db.get(Project, project_id)
+                    job = db.get(Job, job_id)
+                    if project is None or job is None:
+                        logger.error("project or job disappeared during retry")
                         break
-                    except JobCancelled:
-                        db.rollback()
-                        project.status = "cancelled"
+                    if job.status == "cancelled" or project.status == "cancelled":
                         job.status = "cancelled"
                         job.step = "cancelled"
                         job.error = "用户已取消任务"
                         job.updated_at = datetime.now(timezone.utc)
                         db.commit()
                         break
-                    except Exception as exc:
-                        db.rollback()
-                        project = db.get(Project, project_id)
-                        job = db.get(Job, job_id)
-                        if project is None or job is None:
-                            logger.error("project or job disappeared during retry")
-                            break
-                        if job.status == "cancelled" or project.status == "cancelled":
-                            job.status = "cancelled"
-                            job.step = "cancelled"
-                            job.error = "用户已取消任务"
-                            job.updated_at = datetime.now(timezone.utc)
-                            db.commit()
-                            break
-                        retryable = is_retryable_exception(exc)
-                        if retryable and attempt < settings.retry_max_attempts:
-                            delay = retry_delay(
-                                attempt,
-                                settings.retry_base_delay_s,
-                                settings.retry_max_delay_s,
-                            )
-                            logger.warning(
-                                "pipeline transient failure project=%s attempt=%s delay=%.2fs",
-                                project_id,
-                                attempt,
-                                delay,
-                            )
-                            job.status = "running"
-                            job.step = "retrying"
-                            job.error = redact_exception(exc, settings, limit=500)
-                            job.updated_at = datetime.now(timezone.utc)
-                            db.commit()
-                            time.sleep(delay)
-                            attempt += 1
-                            continue
-
-                        logger.exception("pipeline failed for project %s", project_id)
-                        project.status = "failed"
-                        job.status = "failed"
-                        job.step = "failed"
-                        job.error = redact_exception(exc, settings)
+                    retryable = is_retryable_exception(exc)
+                    if retryable and attempt < settings.retry_max_attempts:
+                        delay = retry_delay(
+                            attempt,
+                            settings.retry_base_delay_s,
+                            settings.retry_max_delay_s,
+                        )
+                        logger.warning(
+                            "pipeline transient failure project=%s attempt=%s delay=%.2fs",
+                            project_id,
+                            attempt,
+                            delay,
+                        )
+                        job.status = "running"
+                        job.step = "retrying"
+                        job.error = redact_exception(exc, settings, limit=500)
                         job.updated_at = datetime.now(timezone.utc)
                         db.commit()
-                        break
-            finally:
-                capacity.release_job()
+                        time.sleep(delay)
+                        attempt += 1
+                        continue
+
+                    logger.exception("pipeline failed for project %s", project_id)
+                    project.status = "failed"
+                    job.status = "failed"
+                    job.step = "failed"
+                    job.error = redact_exception(exc, settings)
+                    job.updated_at = datetime.now(timezone.utc)
+                    db.commit()
+                    break
     finally:
+        if slot_held and not capacity.is_owned("analysis"):
+            capacity.release_job("analysis")
         request_id_ctx.reset(token)
 
 
@@ -188,7 +197,7 @@ def _execute(db: Session, project: Project, job: Job, settings: Settings) -> Non
     _check_cancelled(db, job)
 
     _update_job(db, job, step="transcribing", progress=0.47)
-    transcripts = _transcribe(root, source, ffmpeg, settings)
+    transcripts, asr_status = _transcribe(root, source, ffmpeg, settings)
     _check_cancelled(db, job)
 
     _update_job(db, job, step="analyzing", progress=0.5)
@@ -247,6 +256,7 @@ def _execute(db: Session, project: Project, job: Job, settings: Settings) -> Non
 
     job.metrics = {
         **gateway.stats(),
+        **gateway.execution_metadata(asr_status=asr_status),
         "request_id": current_request_id(),
     }
     _update_job(db, job, status="done", step="done", progress=1.0, error="")
@@ -263,17 +273,17 @@ def _check_cancelled(db: Session, job: Job) -> None:
 
 def _transcribe(
     root: Path, source: Path, ffmpeg: str, settings: Settings
-) -> list[dict]:
+) -> tuple[list[dict], str]:
     """Optionally transcribe audio; ASR failure must not fail the whole job."""
     if settings.asr_provider.lower().strip() in ("", "none"):
-        return []
+        return [], "disabled"
     audio_path = root / "audio.wav"
     try:
         media.extract_audio(ffmpeg, source, audio_path)
-        return asr.transcribe(audio_path, settings)
+        return asr.transcribe(audio_path, settings), "ok"
     except Exception as exc:
         logger.warning("ASR skipped: %s", exc)
-        return []
+        return [], "failed"
 
 
 def _analyze_shots(

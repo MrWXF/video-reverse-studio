@@ -82,6 +82,9 @@ def test_pipeline_completes_and_writes_recipe_assets(pipeline_env):
         assert job.status == "done"
         assert job.step == "done"
         assert job.metrics["request_id"] == "trace-pipeline-1"
+        assert job.metrics["analysis_mode"] == "mock"
+        assert job.metrics["degraded"] is False
+        assert job.metrics["asr_status"] == "disabled"
         assert [shot.index for shot in shots] == [1, 2]
         assert all(shot.confidence > 0 for shot in shots)
     output = data_dir / "projects" / "project-1" / "output"

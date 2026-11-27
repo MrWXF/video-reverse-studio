@@ -18,6 +18,7 @@ class LLMGateway:
         self.calls = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
+        self._degradation_reasons: list[str] = []
 
     @property
     def enabled(self) -> bool:
@@ -50,6 +51,15 @@ class LLMGateway:
             self.prompt_tokens += int(usage.get("input_tokens") or 0)
             self.completion_tokens += int(usage.get("output_tokens") or 0)
 
+    def record_degradation(self, reason: str) -> None:
+        """Record one transparent fallback reason without duplicating messages."""
+        cleaned = (reason or "").strip()
+        if not cleaned:
+            return
+        with self._lock:
+            if cleaned not in self._degradation_reasons and len(self._degradation_reasons) < 10:
+                self._degradation_reasons.append(cleaned[:300])
+
     def stats(self) -> dict:
         """Return a consistent snapshot of call and token counters."""
         with self._lock:
@@ -58,3 +68,19 @@ class LLMGateway:
                 "prompt_tokens": self.prompt_tokens,
                 "completion_tokens": self.completion_tokens,
             }
+
+    def execution_metadata(self, *, asr_status: str | None = None) -> dict:
+        """Return explicit execution-mode and degradation metadata for API clients."""
+        with self._lock:
+            reasons = list(self._degradation_reasons)
+        degraded = bool(reasons)
+        mode = "degraded" if degraded else ("live" if self.enabled else "mock")
+        payload = {
+            "analysis_mode": mode,
+            "degraded": degraded,
+            "degradation_reasons": reasons,
+            "llm_enabled": self.enabled,
+        }
+        if asr_status is not None:
+            payload["asr_status"] = asr_status
+        return payload

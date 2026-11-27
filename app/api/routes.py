@@ -17,7 +17,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session, selectinload
 
 from ..config import Settings, get_settings
@@ -32,7 +32,7 @@ from ..schemas import (
     TimelineSplitRequest,
 )
 from ..serializers import job_payload, project_payload, shot_payload
-from ..services import capacity, media, pipeline, sse, timeline, uploads
+from ..services import capacity, media, pipeline, sse, task_queue, timeline, uploads
 from ..services.http_range import range_file_response
 from ..services.reference import (
     aspect_ratio_for,
@@ -57,18 +57,38 @@ def _project_media_path(project_id: str, stored_path: str, settings: Settings) -
 
 
 @router.get("/healthz")
-def healthz() -> dict:
+def healthz(db: Session = Depends(get_db)) -> dict:
     """Return service readiness, provider configuration, media tools, and job capacity."""
     settings = get_settings()
-    return {
-        "status": "ok",
+    try:
+        db.execute(text("SELECT 1"))
+        database_ok = True
+    except Exception:
+        database_ok = False
+    analysis_mode = (
+        "mock"
+        if settings.llm_provider.lower() == "mock" or not settings.llm_api_key
+        else "live"
+    )
+    payload = {
+        "status": "ok" if database_ok else "error",
         "llm_provider": settings.llm_provider,
         "llm_enabled": bool(settings.llm_api_key) and settings.llm_provider.lower() != "mock",
+        "analysis_mode": analysis_mode,
+        "auth_enabled": bool(settings.app_password),
+        "insecure_no_auth": bool(settings.allow_insecure_no_auth and not settings.app_password),
+        "database": "ok" if database_ok else "unavailable",
         "ffmpeg": bool(media.resolve_ffmpeg(settings.ffmpeg_bin)),
         "ffprobe": bool(media.resolve_ffprobe(settings.ffprobe_bin)),
         "api_version": "v1",
+        "max_upload_mb": settings.max_upload_mb,
         "active_jobs": capacity.active_jobs(),
+        "active_jobs_by_kind": capacity.active_by_kind(),
+        "queue": task_queue.pending_counts(),
     }
+    if not database_ok:
+        return JSONResponse(status_code=503, content=payload)
+    return payload
 
 
 @router.post(
@@ -95,80 +115,106 @@ def create_project(
 ) -> dict:
     """Validate and persist an upload, then queue the full analysis pipeline."""
     settings = get_settings()
-    if not capacity.has_capacity(settings.max_active_jobs):
-        raise HTTPException(status_code=503, detail="当前分析任务已达并发上限，请稍后重试")
-
     original_name = uploads.safe_filename(file.filename or "")
     suffix = Path(original_name).suffix.lower()
     if suffix not in ALLOWED_SUFFIXES:
         raise HTTPException(
             status_code=400, detail=f"不支持的视频格式：{suffix or '未知'}"
         )
+    if not capacity.reserve("analysis", settings.max_active_jobs):
+        raise HTTPException(status_code=503, detail="当前分析任务已达并发上限，请稍后重试")
 
-    project_id = str(uuid.uuid4())
-    root = settings.data_dir / "projects" / project_id
-    root.mkdir(parents=True, exist_ok=True)
-    target = root / f"source{suffix}"
-    limit = settings.max_upload_mb * 1024 * 1024
-
+    handed_off = False
     try:
-        uploads.save_validated_upload(file, target, limit)
-    except uploads.UploadTooLargeError as exc:
-        shutil.rmtree(root, ignore_errors=True)
-        raise HTTPException(
-            status_code=413,
-            detail=f"文件超过 {settings.max_upload_mb}MB 限制",
-        ) from exc
-    except uploads.UploadValidationError as exc:
-        shutil.rmtree(root, ignore_errors=True)
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception:
-        shutil.rmtree(root, ignore_errors=True)
-        raise
+        project_id = str(uuid.uuid4())
+        root = settings.data_dir / "projects" / project_id
+        root.mkdir(parents=True, exist_ok=True)
+        target = root / f"source{suffix}"
+        limit = settings.max_upload_mb * 1024 * 1024
+        try:
+            uploads.save_validated_upload(file, target, limit)
+        except uploads.UploadTooLargeError as exc:
+            shutil.rmtree(root, ignore_errors=True)
+            raise HTTPException(
+                status_code=413,
+                detail=f"文件超过 {settings.max_upload_mb}MB 限制",
+            ) from exc
+        except uploads.UploadValidationError as exc:
+            shutil.rmtree(root, ignore_errors=True)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception:
+            shutil.rmtree(root, ignore_errors=True)
+            raise
 
-    project = Project(
-        id=project_id,
-        title=uploads.clean_text(
-            title,
-            default=Path(original_name).stem or "未命名项目",
-            limit=200,
-        ),
-        source_path=str(target),
-        status="queued",
-    )
-    job = Job(id=str(uuid.uuid4()), project_id=project_id, status="queued", step="queued")
-    db.add_all([project, job])
-    db.commit()
-    background.add_task(
-        pipeline.run_pipeline,
-        project_id,
-        job.id,
-        request_id=current_request_id(),
-    )
-    return {"project_id": project_id, "job_id": job.id, "status": "queued"}
+        project = Project(
+            id=project_id,
+            title=uploads.clean_text(
+                title,
+                default=Path(original_name).stem or "未命名项目",
+                limit=200,
+            ),
+            source_path=str(target),
+            status="queued",
+        )
+        job = Job(
+            id=str(uuid.uuid4()), project_id=project_id, status="queued", step="queued"
+        )
+        db.add_all([project, job])
+        db.commit()
+        task = task_queue.enqueue(
+            db,
+            "analysis",
+            job.id,
+            payload={"project_id": project_id},
+            request_id=current_request_id(),
+        )
+        task_queue.schedule(background, db, task)
+        handed_off = True
+        return {"project_id": project_id, "job_id": job.id, "status": "queued"}
+    finally:
+        if not handed_off:
+            capacity.release_job("analysis")
 
 
 @router.get("/api/projects")
 def list_projects(db: Session = Depends(get_db)) -> list[dict]:
     """List projects newest-first with their latest job summary and shot data."""
-    projects = db.scalars(
-        select(Project)
-        .options(selectinload(Project.shots))
+    latest_job_id = (
+        select(Job.id)
+        .where(Job.project_id == Project.id)
+        .order_by(Job.created_at.desc())
+        .limit(1)
+        .correlate(Project)
+        .scalar_subquery()
+    )
+    shot_count = (
+        select(func.count(Shot.id))
+        .where(Shot.project_id == Project.id)
+        .correlate(Project)
+        .scalar_subquery()
+    )
+    rows = db.execute(
+        select(
+            Project,
+            latest_job_id.label("latest_job_id"),
+            shot_count.label("shot_count"),
+        )
         .order_by(Project.created_at.desc())
     ).all()
+    job_ids = [job_id for _, job_id, _ in rows if job_id]
+    jobs = {
+        job.id: job
+        for job in db.scalars(select(Job).where(Job.id.in_(job_ids))).all()
+    } if job_ids else {}
     payload: list[dict] = []
-    for project in projects:
-        job = db.scalar(
-            select(Job)
-            .where(Job.project_id == project.id)
-            .order_by(Job.created_at.desc())
-            .limit(1)
-        )
+    for project, job_id, count in rows:
+        job = jobs.get(job_id)
         payload.append(
             project_payload(
                 project,
                 job,
                 timeline_min_shot_seconds=get_settings().min_shot_seconds,
+                shot_count=count,
             )
         )
     return payload
@@ -345,6 +391,26 @@ def _timeline_response(mutation: timeline.TimelineMutation) -> dict:
     }
 
 
+def _queue_timeline_task(
+    background: BackgroundTasks,
+    db: Session,
+    project_id: str,
+    mutation: timeline.TimelineMutation,
+) -> None:
+    """Persist a durable timeline task and schedule its immediate execution."""
+    task = task_queue.enqueue(
+        db,
+        "timeline",
+        mutation.job_id,
+        payload={
+            "project_id": project_id,
+            "shot_ids": mutation.affected_shot_ids,
+        },
+        request_id=current_request_id(),
+    )
+    task_queue.schedule(background, db, task)
+
+
 def _timeline_error(exc: timeline.TimelineError) -> HTTPException:
     """Map timeline domain errors to their public HTTP status codes."""
     if isinstance(exc, timeline.TimelineNotFoundError):
@@ -386,19 +452,26 @@ def update_timeline_boundary(
     """
     project = _timeline_project(db, project_id)
     settings = get_settings()
+    if not capacity.reserve("analysis", settings.max_active_jobs):
+        raise HTTPException(status_code=503, detail="当前分析任务已达并发上限，请稍后重试")
+    handed_off = False
     try:
         mutation = timeline.update_boundary(
-            db, project, shot_id, payload.boundary_s, settings
+            db,
+            project,
+            shot_id,
+            payload.boundary_s,
+            settings,
+            capacity_reserved=True,
         )
+        _queue_timeline_task(background, db, project_id, mutation)
+        handed_off = True
     except timeline.TimelineError as exc:
         db.rollback()
         raise _timeline_error(exc) from exc
-    background.add_task(
-        timeline.run_timeline_reanalysis,
-        project_id,
-        mutation.job_id,
-        mutation.affected_shot_ids,
-    )
+    finally:
+        if not handed_off:
+            capacity.release_job("analysis")
     return _timeline_response(mutation)
 
 
@@ -417,19 +490,26 @@ def split_timeline_shot(
     """Split one shot at a validated timestamp and queue targeted re-analysis."""
     project = _timeline_project(db, project_id)
     settings = get_settings()
+    if not capacity.reserve("analysis", settings.max_active_jobs):
+        raise HTTPException(status_code=503, detail="当前分析任务已达并发上限，请稍后重试")
+    handed_off = False
     try:
         mutation = timeline.split_shot(
-            db, project, shot_id, payload.split_at, settings
+            db,
+            project,
+            shot_id,
+            payload.split_at,
+            settings,
+            capacity_reserved=True,
         )
+        _queue_timeline_task(background, db, project_id, mutation)
+        handed_off = True
     except timeline.TimelineError as exc:
         db.rollback()
         raise _timeline_error(exc) from exc
-    background.add_task(
-        timeline.run_timeline_reanalysis,
-        project_id,
-        mutation.job_id,
-        mutation.affected_shot_ids,
-    )
+    finally:
+        if not handed_off:
+            capacity.release_job("analysis")
     return _timeline_response(mutation)
 
 
@@ -447,19 +527,25 @@ def merge_timeline_shots(
     """Merge two adjacent shots and queue re-analysis for the merged shot."""
     project = _timeline_project(db, project_id)
     settings = get_settings()
+    if not capacity.reserve("analysis", settings.max_active_jobs):
+        raise HTTPException(status_code=503, detail="当前分析任务已达并发上限，请稍后重试")
+    handed_off = False
     try:
         mutation = timeline.merge_shots(
-            db, project, payload.shot_ids, settings
+            db,
+            project,
+            payload.shot_ids,
+            settings,
+            capacity_reserved=True,
         )
+        _queue_timeline_task(background, db, project_id, mutation)
+        handed_off = True
     except timeline.TimelineError as exc:
         db.rollback()
         raise _timeline_error(exc) from exc
-    background.add_task(
-        timeline.run_timeline_reanalysis,
-        project_id,
-        mutation.job_id,
-        mutation.affected_shot_ids,
-    )
+    finally:
+        if not handed_off:
+            capacity.release_job("analysis")
     return _timeline_response(mutation)
 
 
@@ -477,17 +563,25 @@ def reanalyze_timeline_shot(
     """Queue keyframe extraction and analysis for one existing shot."""
     project = _timeline_project(db, project_id)
     settings = get_settings()
+    if not capacity.reserve("analysis", settings.max_active_jobs):
+        raise HTTPException(status_code=503, detail="当前分析任务已达并发上限，请稍后重试")
+    handed_off = False
     try:
-        mutation = timeline.queue_reanalysis(db, project, shot_id, settings)
+        mutation = timeline.queue_reanalysis(
+            db,
+            project,
+            shot_id,
+            settings,
+            capacity_reserved=True,
+        )
+        _queue_timeline_task(background, db, project_id, mutation)
+        handed_off = True
     except timeline.TimelineError as exc:
         db.rollback()
         raise _timeline_error(exc) from exc
-    background.add_task(
-        timeline.run_timeline_reanalysis,
-        project_id,
-        mutation.job_id,
-        mutation.affected_shot_ids,
-    )
+    finally:
+        if not handed_off:
+            capacity.release_job("analysis")
     return _timeline_response(mutation)
 
 
@@ -505,30 +599,40 @@ def reanalyze(
 ) -> dict:
     """Queue a full analysis when no project job is active and capacity is available."""
     settings = get_settings()
-    if not capacity.has_capacity(settings.max_active_jobs):
+    if not capacity.reserve("analysis", settings.max_active_jobs):
         raise HTTPException(status_code=503, detail="当前分析任务已达并发上限，请稍后重试")
-    project = db.get(Project, project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="项目不存在")
-    active = db.scalar(
-        select(Job).where(
-            Job.project_id == project_id,
-            Job.status.in_(["queued", "running"]),
+    handed_off = False
+    try:
+        project = db.get(Project, project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="项目不存在")
+        active = db.scalar(
+            select(Job).where(
+                Job.project_id == project_id,
+                Job.status.in_(["queued", "running"]),
+            )
         )
-    )
-    if active is not None:
-        raise HTTPException(status_code=409, detail="该项目已有分析任务在进行")
-    job = Job(id=str(uuid.uuid4()), project_id=project_id, status="queued", step="queued")
-    project.status = "queued"
-    db.add(job)
-    db.commit()
-    background.add_task(
-        pipeline.run_pipeline,
-        project_id,
-        job.id,
-        request_id=current_request_id(),
-    )
-    return {"job_id": job.id, "status": "queued"}
+        if active is not None:
+            raise HTTPException(status_code=409, detail="该项目已有分析任务在进行")
+        job = Job(
+            id=str(uuid.uuid4()), project_id=project_id, status="queued", step="queued"
+        )
+        project.status = "queued"
+        db.add(job)
+        db.commit()
+        task = task_queue.enqueue(
+            db,
+            "analysis",
+            job.id,
+            payload={"project_id": project_id},
+            request_id=current_request_id(),
+        )
+        task_queue.schedule(background, db, task)
+        handed_off = True
+        return {"job_id": job.id, "status": "queued"}
+    finally:
+        if not handed_off:
+            capacity.release_job("analysis")
 
 
 @router.get("/api/projects/{project_id}/recipe")
@@ -610,6 +714,8 @@ def cancel_project(project_id: str, db: Session = Depends(get_db)) -> dict:
     job.updated_at = datetime.now(timezone.utc)
     project.status = "cancelled"
     db.commit()
+    task_queue.cancel_for(db, "analysis", [job.id], "用户已取消任务")
+    task_queue.cancel_for(db, "timeline", [job.id], "用户已取消任务")
     return {"project_id": project_id, "job_id": job.id, "status": "cancelled"}
 
 
@@ -623,6 +729,28 @@ def delete_project(project_id: str, db: Session = Depends(get_db)) -> dict:
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="项目不存在")
+    active_jobs = list(
+        db.scalars(
+            select(Job).where(
+                Job.project_id == project_id,
+                Job.status.in_(["queued", "running"]),
+            )
+        ).all()
+    )
+    for job in active_jobs:
+        job.status = "cancelled"
+        job.step = "cancelled"
+        job.error = "项目已删除"
+        job.updated_at = datetime.now(timezone.utc)
+    project.status = "cancelled"
+    db.execute(
+        update(PromptProject)
+        .where(PromptProject.source_project_id == project_id)
+        .values(source_project_id=None)
+    )
+    db.commit()
+    task_queue.cancel_for(db, "analysis", [job.id for job in active_jobs], "项目已删除")
+    task_queue.cancel_for(db, "timeline", [job.id for job in active_jobs], "项目已删除")
     db.delete(project)
     db.commit()
 

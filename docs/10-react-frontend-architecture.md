@@ -2,7 +2,7 @@
 
 > 日期：2026-11-26  
 > 技术路线：方案 B，React + Vite + TypeScript  
-> 当前阶段：基础工程与质量仪表盘试点
+> 当前阶段：阶段 4（提示词工作区）进行中
 
 ## 1. 目标
 
@@ -16,11 +16,10 @@
 
 ## 2. 当前基线
 
-- `app.js` 约 1,600 行，负责逆向工作区、时间轴和质量仪表盘；
-- `prompt.js` 约 1,800 行，负责提示词生成、版本、分享和视频生成；
-- `style.css` 约 7,800 行，包含 A/B 主题和全部页面样式；
-- 没有 `package.json`、模块系统、类型检查、构建产物和前端测试；
-- 后端已提供项目、提示词、质量、分享和生成任务 API。
+- `web/` 已提供 React 18.3、Vite 5、TypeScript strict、路由、API 客户端、Zustand 和 Toast；
+- `/app/reverse`、`/app/quality` 和 `/app/generate` 已可运行，经典 `app.js`、`prompt.js` 和 `style.css` 仍保留在 `/` 作为对照；
+- `web/package.json` 和 `web/package-lock.json` 已提交，CI 使用 `npm ci`、typecheck 和 build；
+- 后端已提供项目、提示词、质量、分享和生成任务 API，当前测试基线为 `140 passed`。
 
 这些交互已经达到 SPA 复杂度，继续使用全局 DOM 拼接会增加状态同步和回归风险。
 
@@ -37,7 +36,7 @@
 | 样式 | 现有 CSS 变量 + 组件样式 | 保留 A/B 主题，不立即引入 Tailwind 或重型组件库 |
 | 测试 | TypeScript 检查 + Vite build，后续补 Vitest/Playwright | 先保证可构建和浏览器可验证 |
 
-React 版本说明：当前机器无法连接 npm Registry，只有本地 React 18.3.1 可用。代码不依赖 React 19 专属 API；恢复网络后只需升级 `react`、`react-dom` 和类型包。
+React 版本说明：当前锁定在 React 18.3.1，代码不依赖 React 19 专属 API。依赖可通过 `npm ci` 复现；后续升级 React 19 时同步更新 `react`、`react-dom` 和类型包即可。
 
 ## 4. 部署结构
 
@@ -88,7 +87,7 @@ web/
 | `/reverse` | 逆向项目列表与上传 | 第二 |
 | `/reverse/:projectId` | 镜头、详情和时间轴 | 第三 |
 | `/generate` | 提示词 Brief 与项目列表 | 第四 |
-| `/generate/:projectId` | 镜头编辑、版本、分享与导出 | 第五 |
+| `/generate/:projectId` | 镜头编辑、版本、分享与导出 | 第五，未完成 |
 | `/quality` | 质量仪表盘 | 第一，已完成试点 |
 | `/share/:token` | 对外分享页 | 第六，优先保留现有服务端入口 |
 
@@ -146,11 +145,22 @@ web/
 
 验收：`/app/reverse/:projectId` 显示时间轴；拖动边界、方向键微调、拆分、合并和局部重分析均调用现有 API；运行中的任务会锁定编辑控件；A/B 主题下样式正常。
 
-### 阶段 4：提示词生成（下一阶段）
+### 阶段 4：提示词生成（进行中）
 
-- Brief、参考项目、模型设置；
-- 镜头编辑、版本对比、实体一致性；
-- 分享、评论、导出和视频生成任务。
+已完成：
+
+- Brief、参考项目、方案查看、重新生成；
+- Markdown/JSON 导出；
+- 视频生成任务提交与状态查看。
+
+待完成：
+
+- 逐镜编辑、字段锁定和实体一致性编辑；
+- 版本对比与恢复；
+- 分享、评论和 ZIP 导出；
+- 成片回测页面。
+
+验收：`/app/generate` 与经典提示词工作区在主链路上功能等价；逐镜编辑、版本、分享评论和回测均有浏览器回归。
 
 ### 阶段 5：切换入口（待阶段 4 完成后）
 
@@ -173,7 +183,7 @@ web/
 - FastAPI 提供 `/app` 入口；
 - React 质量页读取真实 `/api/insights/quality`；
 - 再切回旧 `/` 页面仍正常；
-- 记录依赖离线限制和下一阶段任务。
+- 记录剩余迁移任务、风险与验证基线。
 
 ## 13. 当前验证基线
 
@@ -187,7 +197,7 @@ python -m pytest -q
 python -m ruff check app tests
 ```
 
-当前结果：TypeScript 通过、Vite 构建通过、后端测试 `121 passed`、Ruff 通过。浏览器验证覆盖 `/app/reverse`、项目详情、24 镜头时间轴、A/B 主题、拖动、键盘微调、拆分、合并、局部重分析，控制台无错误、无失败请求。
+当前结果：TypeScript 通过、Vite 构建通过、后端测试 `140 passed`、Ruff 和 compileall 通过。浏览器验证覆盖 `/app/reverse`、项目详情、24 镜头时间轴、A/B 主题、拖动、键盘微调、拆分、合并和局部重分析；Playwright 与真实 XSS 浏览器回归仍待补齐。
 
 ## 14. Skills 使用说明
 

@@ -18,12 +18,19 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from ..config import get_settings
 from ..db import get_db
-from ..models import DeliveryReview, Project, PromptProject, PromptShare, PromptVersion
+from ..models import (
+    DeliveryReview,
+    GenerationJob,
+    Project,
+    PromptProject,
+    PromptShare,
+    PromptVersion,
+)
 from ..observability import current_request_id
 from ..schemas import EntityBible, PromptBrief, PromptPlan, PromptShotUpdate, ShareCreate
 from ..serializers import (
@@ -34,7 +41,6 @@ from ..serializers import (
 from ..services import (
     capacity,
     comparison,
-    delivery_review,
     delivery_zip,
     model_profiles,
     prompt_export,
@@ -42,6 +48,7 @@ from ..services import (
     prompt_versions,
     qr_codes,
     sse,
+    task_queue,
     uploads,
     version_comparison,
 )
@@ -90,40 +97,48 @@ def create_prompt_project(
 ) -> dict:
     """Snapshot the brief and optional reference, then queue prompt generation."""
     settings = get_settings()
-    if not capacity.has_capacity(settings.max_active_jobs):
+    if not capacity.reserve("prompt", settings.max_active_jobs):
         raise HTTPException(status_code=503, detail="当前生成任务已达并发上限，请稍后重试")
-    reference = None
-    if brief.reference_project_id:
-        source = db.scalar(
-            select(Project)
-            .options(selectinload(Project.shots))
-            .where(Project.id == brief.reference_project_id)
-        )
-        if source is None:
-            raise HTTPException(status_code=404, detail="参考项目不存在")
-        if source.status != "done" or not source.shots:
-            raise HTTPException(status_code=409, detail="参考项目尚未完成分析")
-        reference = build_reference_context(source, brief.reference_mode)
+    handed_off = False
+    try:
+        reference = None
+        if brief.reference_project_id:
+            source = db.scalar(
+                select(Project)
+                .options(selectinload(Project.shots))
+                .where(Project.id == brief.reference_project_id)
+            )
+            if source is None:
+                raise HTTPException(status_code=404, detail="参考项目不存在")
+            if source.status != "done" or not source.shots:
+                raise HTTPException(status_code=409, detail="参考项目尚未完成分析")
+            reference = build_reference_context(source, brief.reference_mode)
 
-    project = PromptProject(
-        id=str(uuid.uuid4()),
-        title=uploads.clean_text(brief.title, default=brief.idea[:60], limit=200),
-        source_project_id=brief.reference_project_id,
-        reference_mode=brief.reference_mode,
-        reference_snapshot_json=reference.model_dump(mode="json") if reference else {},
-        entity_bible_json=brief.entity_bible.model_dump(mode="json"),
-        brief_json=brief.model_dump(mode="json"),
-        status="queued",
-        step="queued",
-    )
-    db.add(project)
-    db.commit()
-    background.add_task(
-        prompt_generation.run_prompt_generation,
-        project.id,
-        request_id=current_request_id(),
-    )
-    return {"prompt_project_id": project.id, "status": "queued"}
+        project = PromptProject(
+            id=str(uuid.uuid4()),
+            title=uploads.clean_text(brief.title, default=brief.idea[:60], limit=200),
+            source_project_id=brief.reference_project_id,
+            reference_mode=brief.reference_mode,
+            reference_snapshot_json=reference.model_dump(mode="json") if reference else {},
+            entity_bible_json=brief.entity_bible.model_dump(mode="json"),
+            brief_json=brief.model_dump(mode="json"),
+            status="queued",
+            step="queued",
+        )
+        db.add(project)
+        db.commit()
+        task = task_queue.enqueue(
+            db,
+            "prompt",
+            project.id,
+            request_id=current_request_id(),
+        )
+        task_queue.schedule(background, db, task)
+        handed_off = True
+        return {"prompt_project_id": project.id, "status": "queued"}
+    finally:
+        if not handed_off:
+            capacity.release_job("prompt")
 
 
 @router.patch("/api/prompt-projects/{project_id}/shots/{shot_index}")
@@ -310,10 +325,19 @@ def get_prompt_comparison(project_id: str, db: Session = Depends(get_db)) -> dic
 @router.get("/api/prompt-projects")
 def list_prompt_projects(db: Session = Depends(get_db)) -> list[dict]:
     """List prompt projects newest-first without embedding full plans."""
-    projects = db.scalars(
-        select(PromptProject).order_by(PromptProject.created_at.desc())
+    rows = db.execute(
+        select(PromptProject, func.count(PromptVersion.id))
+        .outerjoin(
+            PromptVersion,
+            PromptVersion.prompt_project_id == PromptProject.id,
+        )
+        .group_by(PromptProject.id)
+        .order_by(PromptProject.created_at.desc())
     ).all()
-    return [prompt_project_payload(project) for project in projects]
+    return [
+        prompt_project_payload(project, version_count=count)
+        for project, count in rows
+    ]
 
 
 @router.get("/api/prompt-projects/{project_id}")
@@ -335,24 +359,32 @@ def regenerate_prompt_project(
     is exhausted. The queued state is committed before the task is started.
     """
     settings = get_settings()
-    if not capacity.has_capacity(settings.max_active_jobs):
+    if not capacity.reserve("prompt", settings.max_active_jobs):
         raise HTTPException(status_code=503, detail="当前生成任务已达并发上限，请稍后重试")
-    project = _get_project(db, project_id)
-    if project.status in {"queued", "running"}:
-        raise HTTPException(status_code=409, detail="该提示词项目正在生成")
+    handed_off = False
+    try:
+        project = _get_project(db, project_id)
+        if project.status in {"queued", "running"}:
+            raise HTTPException(status_code=409, detail="该提示词项目正在生成")
 
-    project.status = "queued"
-    project.step = "queued"
-    project.progress = 0.0
-    project.error = ""
-    project.plan_json = {}
-    db.commit()
-    background.add_task(
-        prompt_generation.run_prompt_generation,
-        project.id,
-        request_id=current_request_id(),
-    )
-    return {"prompt_project_id": project.id, "status": "queued"}
+        project.status = "queued"
+        project.step = "queued"
+        project.progress = 0.0
+        project.error = ""
+        project.plan_json = {}
+        db.commit()
+        task = task_queue.enqueue(
+            db,
+            "prompt",
+            project.id,
+            request_id=current_request_id(),
+        )
+        task_queue.schedule(background, db, task)
+        handed_off = True
+        return {"prompt_project_id": project.id, "status": "queued"}
+    finally:
+        if not handed_off:
+            capacity.release_job("prompt")
 
 
 @router.post("/api/prompt-projects/{project_id}/cancel", status_code=202)
@@ -366,6 +398,7 @@ def cancel_prompt_project(project_id: str, db: Session = Depends(get_db)) -> dic
     project.error = "用户已取消生成"
     project.updated_at = datetime.now(timezone.utc)
     db.commit()
+    task_queue.cancel_for(db, "prompt", [project.id], "用户已取消生成")
     return {"prompt_project_id": project.id, "status": "cancelled"}
 
 
@@ -414,8 +447,6 @@ def create_delivery_review(
 ) -> dict:
     """Validate a delivered video, persist it, and queue structural review."""
     settings = get_settings()
-    if not capacity.has_capacity(settings.max_active_jobs):
-        raise HTTPException(status_code=503, detail="当前任务已达并发上限，请稍后重试")
     project = _get_project(db, project_id)
     _get_done_plan(project)
     original_name = uploads.safe_filename(file.filename or "")
@@ -442,22 +473,34 @@ def create_delivery_review(
         shutil.rmtree(root, ignore_errors=True)
         raise
 
-    review = DeliveryReview(
-        id=review_id,
-        prompt_project_id=project.id,
-        filename=original_name or target.name,
-        source_path=str(target),
-        status="queued",
-        step="queued",
-    )
-    db.add(review)
-    db.commit()
-    background.add_task(
-        delivery_review.run_delivery_review,
-        review.id,
-        request_id=current_request_id(),
-    )
-    return review_payload(review)
+    if not capacity.reserve("review", settings.max_active_jobs):
+        shutil.rmtree(root, ignore_errors=True)
+        raise HTTPException(status_code=503, detail="当前任务已达并发上限，请稍后重试")
+    handed_off = False
+    try:
+        review = DeliveryReview(
+            id=review_id,
+            prompt_project_id=project.id,
+            filename=original_name or target.name,
+            source_path=str(target),
+            status="queued",
+            step="queued",
+        )
+        db.add(review)
+        db.commit()
+        task = task_queue.enqueue(
+            db,
+            "review",
+            review.id,
+            request_id=current_request_id(),
+        )
+        task_queue.schedule(background, db, task)
+        handed_off = True
+        return review_payload(review)
+    finally:
+        if not handed_off:
+            shutil.rmtree(root, ignore_errors=True)
+            capacity.release_job("review")
 
 
 @router.get("/api/prompt-projects/{project_id}/reviews")
@@ -498,6 +541,7 @@ def delete_delivery_review(
     review = db.get(DeliveryReview, review_id)
     if review is None or review.prompt_project_id != project_id:
         raise HTTPException(status_code=404, detail="回测记录不存在")
+    task_queue.cancel_for(db, "review", [review_id], "回测记录已删除")
     db.delete(review)
     db.commit()
     root = (get_settings().data_dir / "reviews" / review_id).resolve()
@@ -672,8 +716,39 @@ def export_prompt_project(
 
 @router.delete("/api/prompt-projects/{project_id}")
 def delete_prompt_project(project_id: str, db: Session = Depends(get_db)) -> dict:
-    """Delete a prompt project and its dependent versions, reviews, shares, and comments."""
+    """Delete a prompt project, its dependents, and all managed output files."""
     project = _get_project(db, project_id)
+    review_ids = list(
+        db.scalars(
+            select(DeliveryReview.id).where(
+                DeliveryReview.prompt_project_id == project_id
+            )
+        ).all()
+    )
+    generation_ids = list(
+        db.scalars(
+            select(GenerationJob.id).where(
+                GenerationJob.prompt_project_id == project_id
+            )
+        ).all()
+    )
+    project.status = "cancelled"
+    project.step = "cancelled"
+    db.commit()
+    task_queue.cancel_for(db, "prompt", [project_id], "提示词项目已删除")
+    task_queue.cancel_for(db, "review", review_ids, "提示词项目已删除")
+    task_queue.cancel_for(db, "generation", generation_ids, "提示词项目已删除")
     db.delete(project)
     db.commit()
+
+    settings = get_settings()
+    generations_root = (settings.data_dir / "generations").resolve()
+    generation_dir = (generations_root / project_id).resolve()
+    if generation_dir.exists() and generations_root in generation_dir.parents:
+        shutil.rmtree(generation_dir, ignore_errors=True)
+    reviews_root = (settings.data_dir / "reviews").resolve()
+    for review_id in review_ids:
+        review_dir = (reviews_root / review_id).resolve()
+        if review_dir.exists() and reviews_root in review_dir.parents:
+            shutil.rmtree(review_dir, ignore_errors=True)
     return {"deleted": project_id}

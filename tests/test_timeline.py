@@ -442,7 +442,7 @@ def test_timeline_api_error_mapping(timeline_client, monkeypatch):
     with testing_session() as db:
         db.get(Project, "project-1").status = "done"
         db.commit()
-    monkeypatch.setattr(timeline.capacity, "has_capacity", lambda _limit: False)
+    monkeypatch.setattr(timeline.capacity, "reserve", lambda _kind, _limit: False)
     full = client.post(f"/api/projects/project-1/shots/{shot_ids[0]}/reanalyze")
     assert full.status_code == 503
 

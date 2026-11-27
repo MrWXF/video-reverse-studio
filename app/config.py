@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     app_name: str = "ReelReverse"
     app_username: str = "admin"
     app_password: str = ""
+    allow_insecure_no_auth: bool = False
+    auth_max_failures: int = Field(default=10, ge=1, le=1000)
+    auth_failure_window_s: int = Field(default=60, ge=1, le=3600)
     data_dir: Path = Field(default_factory=lambda: PROJECT_ROOT / "data")
     database_url: str = ""
 
@@ -54,6 +57,8 @@ class Settings(BaseSettings):
     ffmpeg_bin: str = "ffmpeg"
     ffprobe_bin: str = "ffprobe"
     max_upload_mb: int = 500
+    max_request_mb: int = Field(default=16, ge=1, le=4096)
+    max_comment_body_kb: int = Field(default=32, ge=1, le=1024)
     max_shots: int = 24
     scene_threshold: float = 0.32
     min_shot_seconds: float = 0.8
@@ -69,6 +74,11 @@ class Settings(BaseSettings):
     sse_heartbeat_s: float = Field(default=15.0, ge=2.0, le=120.0)
     sse_max_seconds: float = Field(default=900.0, ge=30.0, le=86400.0)
     sse_max_connections: int = Field(default=32, ge=1, le=1000)
+    share_comment_limit: int = Field(default=10, ge=1, le=1000)
+    share_comment_window_s: int = Field(default=60, ge=1, le=3600)
+    task_lease_s: int = Field(default=120, ge=10, le=3600)
+    task_poll_interval_s: float = Field(default=2.0, ge=0.2, le=60.0)
+    task_max_attempts: int = Field(default=2, ge=1, le=5)
 
     @field_validator("data_dir")
     @classmethod

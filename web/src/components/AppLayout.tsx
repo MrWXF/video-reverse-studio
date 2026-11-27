@@ -1,97 +1,110 @@
-import { NavLink, Outlet } from "react-router-dom";
+﻿import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
+import { fetchHealth } from "../api/endpoints";
+import { useApiQuery } from "../hooks/useApiQuery";
+import { Icon, type IconName } from "./Icon";
 import { Toast } from "./Toast";
-import { useUiStore, type ThemeStyle } from "../store/uiStore";
 
-const MODES = [
-  { to: "/reverse", index: "01", label: "逆向视频" },
-  { to: "/generate", index: "02", label: "生成提示词" },
-  { to: "/quality", index: "03", label: "质量洞察" },
-] as const;
+const MODES: Array<{ to: string; label: string; icon: IconName }> = [
+  { to: "/reverse", label: "工作台", icon: "film" },
+  { to: "/generate", label: "提示词", icon: "sparkles" },
+  { to: "/quality", label: "质量", icon: "chart" },
+];
 
-function StyleButton({ value, label, tone }: { value: ThemeStyle; label: string; tone: string }) {
-  const style = useUiStore((state) => state.style);
-  const setStyle = useUiStore((state) => state.setStyle);
-  const active = style === value;
-  return (
-    <button
-      className={`style-option${active ? " is-active" : ""}`}
-      type="button"
-      data-style-option={value}
-      aria-pressed={active}
-      title={label}
-      onClick={() => setStyle(value)}
-    >
-      <i className={`style-dot ${tone}`} aria-hidden="true" />
-      <span>{value === "a" ? "光晕" : "霓虹"}</span>
-    </button>
-  );
+function ModeLabel({ mode, loading, insecure }: { mode?: string; loading: boolean; insecure: boolean }) {
+  if (loading) {
+    return { text: "连接中", tone: "pending", detail: "正在读取服务状态" };
+  }
+  if (insecure) {
+    return { text: "本地开发模式", tone: "warning", detail: "认证已关闭，请勿暴露到公网" };
+  }
+  if (mode === "mock") {
+    return { text: "Mock 演示模式", tone: "warning", detail: "当前结果用于流程验证" };
+  }
+  if (mode === "degraded") {
+    return { text: "降级运行", tone: "warning", detail: "部分能力正在使用备用方案" };
+  }
+  return { text: "服务在线", tone: "online", detail: "真实模型分析已启用" };
 }
 
 export function AppLayout() {
+  const health = useApiQuery((signal) => fetchHealth(signal), []);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const status = ModeLabel({
+    mode: health.data?.analysis_mode,
+    loading: !health.data && !health.error,
+    insecure: health.data?.insecure_no_auth ?? false,
+  });
+  const activeJobs = health.data ? Object.values(health.data.active_jobs_by_kind).reduce((sum, value) => sum + value, 0) : 0;
+
+  const startAnalysis = () => {
+    if (location.pathname !== "/reverse") {
+      navigate("/reverse");
+    }
+    window.setTimeout(() => {
+      document.getElementById("create")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      document.getElementById("upload-video-input")?.focus();
+    }, 180);
+  };
+
   return (
     <>
       <a className="skip-link" href="#react-main">
         跳到主要内容
       </a>
-      <div className="ambient" aria-hidden="true" />
-      <header className="site-nav">
-        <NavLink className="brand" to="/reverse" aria-label="ReelReverse 工作台首页">
-          <span className="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="4" width="18" height="16" rx="4" />
-              <path d="M8 4v16M16 4v16M3 9h5M16 9h5M3 15h5M16 15h5" />
-            </svg>
-          </span>
-          <span className="brand-copy">
-            <strong>ReelReverse</strong>
-            <span>AI VIDEO STUDIO</span>
-          </span>
-        </NavLink>
+      <div className="rr-app">
+        <header className="rr-topbar">
+          <NavLink className="rr-brand" to="/reverse" aria-label="ReelReverse 工作台">
+            <span className="rr-brand-mark" aria-hidden="true"><Icon name="film" size={20} /></span>
+            <span className="rr-brand-copy"><strong>ReelReverse</strong><small>AI VIDEO STUDIO</small></span>
+          </NavLink>
 
-        <nav className="mode-switch" aria-label="工作模式">
+          <nav className="rr-nav" aria-label="主导航">
+            {MODES.map((mode) => (
+              <NavLink key={mode.to} to={mode.to} className={({ isActive }) => `rr-nav-link${isActive ? " is-active" : ""}`}>
+                {mode.label}
+              </NavLink>
+            ))}
+          </nav>
+
+          <div className="rr-topbar-actions">
+            <span className={`rr-status-pill is-${status.tone}`} title={status.detail} aria-live="polite">
+              <i aria-hidden="true" />
+              {status.text}
+            </span>
+            <a className="rr-icon-btn" href="/docs" target="_blank" rel="noreferrer" aria-label="打开 API 文档">
+              <Icon name="external" size={16} />
+            </a>
+            <button className="rr-btn rr-btn-primary rr-topbar-cta" type="button" onClick={startAnalysis}>
+              <Icon name="plus" size={15} /> 新建分析
+            </button>
+            <span className="rr-avatar" aria-label="本地工作区">LR</span>
+          </div>
+        </header>
+
+        <main id="react-main" className="rr-main">
+          <Outlet />
+        </main>
+
+        <footer className="rr-footer">
+          <span>ReelReverse · 把参考片变成可复用的创作配方</span>
+          <span className="rr-footer-status"><i className={`rr-status-dot is-${status.tone}`} aria-hidden="true" />{status.text}{activeJobs ? ` · ${activeJobs} 个任务运行中` : ""}</span>
+        </footer>
+
+        <nav className="rr-mobile-nav" aria-label="移动端导航">
           {MODES.map((mode) => (
-            <NavLink
-              key={mode.to}
-              to={mode.to}
-              className={({ isActive }) => `mode-tab${isActive ? " active" : ""}`}
-            >
-              <span>{mode.index}</span> {mode.label}
+            <NavLink key={mode.to} to={mode.to} className={({ isActive }) => `rr-mobile-nav-link${isActive ? " is-active" : ""}`}>
+              <Icon name={mode.icon} size={20} />
+              <span>{mode.label}</span>
             </NavLink>
           ))}
+          <button className="rr-mobile-nav-link rr-mobile-create" type="button" onClick={startAnalysis}>
+            <Icon name="plus" size={21} />
+            <span>新建</span>
+          </button>
         </nav>
-
-        <div className="nav-actions">
-          <div className="style-switch" role="group" aria-label="界面风格">
-            <StyleButton value="a" label="浅色 · 光晕 Studio" tone="style-dot-a" />
-            <StyleButton value="b" label="深色 · 霓虹影棚" tone="style-dot-b" />
-          </div>
-          <span className="ai-status">REACT · PILOT</span>
-          <a className="nav-cta" href="/docs" target="_blank" rel="noreferrer">
-            API <span aria-hidden="true">→</span>
-          </a>
-        </div>
-      </header>
-
-      <main id="react-main" className="view react-view">
-        <Outlet />
-      </main>
-
-      <footer className="site-footer">
-        <div className="footer-inner">
-          <div className="footer-brand">
-            <b>ReelReverse</b>
-            <span>把参考片变成下一次创作的起点。</span>
-          </div>
-          <div className="footer-links">
-            <a href="/">经典界面</a>
-            <a href="/docs" target="_blank" rel="noreferrer">
-              API 文档
-            </a>
-            <span>REACT · MIGRATION 01</span>
-          </div>
-        </div>
-      </footer>
+      </div>
       <Toast />
     </>
   );

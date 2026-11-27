@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f2eee6" />
+    <title>ReelReverse · 工作台设计稿</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body class="screen">
+    <div class="app">
+      <header class="topbar">
+        <a class="brand" href="index.html" aria-label="ReelReverse 工作台">
+          <span class="brand-mark" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="4"/><path d="M8 4v16M16 4v16M3 9h5M16 9h5M3 15h5M16 15h5"/></svg>
+          </span>
+          <span class="brand-copy"><strong>ReelReverse</strong><small>AI VIDEO STUDIO</small></span>
+        </a>
+        <nav class="mainnav" aria-label="主导航">
+          <a class="active" href="home.html">工作台</a>
+          <a href="prompt-studio.html">提示词</a>
+          <a href="workspace.html">项目</a>
+          <a href="#quality">质量</a>
+        </nav>
+        <div class="topbar-actions">
+          <span class="status-pill"><i class="status-dot" aria-hidden="true"></i>服务在线</span>
+          <button class="icon-button" type="button" aria-label="帮助">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9a2.5 2.5 0 1 1 4 2c-.9.7-1.6 1.2-1.6 2.4M12 17h.01"/></svg>
+          </button>
+          <button class="btn btn-primary" type="button">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            新建分析
+          </button>
+          <span class="avatar" aria-label="当前用户">LR</span>
+        </div>
+      </header>
+
+      <main class="page">
+        <section class="home-hero" aria-labelledby="home-title">
+          <div class="home-hero-copy">
+            <p class="eyebrow">NEW ANALYSIS / 01</p>
+            <h1 id="home-title">上传参考视频，<br /><em>剩下的交给 AI。</em></h1>
+            <p>从镜头、节奏到提示词，一次拆解成可复用的创作方案。你只需要选好参考片。</p>
+          </div>
+          <div class="hero-summary" aria-label="项目概览">
+            <div><strong>04</strong><span>进行中的项目</span></div>
+            <div><strong>52</strong><span>已拆解镜头</span></div>
+          </div>
+        </section>
+
+        <div class="home-grid">
+          <section class="card start-card" aria-labelledby="start-title">
+            <div class="start-card-head">
+              <div>
+                <span class="step-badge">Step 01 · 新建分析</span>
+                <h2 id="start-title">从一段视频开始</h2>
+                <p>支持 3–30 秒短片，画面越清晰，拆解越准确。</p>
+              </div>
+              <span class="limit-note">MAX 500 MB</span>
+            </div>
+
+            <button class="upload-zone" type="button" aria-label="选择参考视频">
+              <span class="upload-zone-inner">
+                <span class="upload-icon" aria-hidden="true">
+                  <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+                </span>
+                <strong>拖入视频，或点击选择</strong>
+                <p>MP4 · MOV · WEBM · MKV · AVI · M4V</p>
+                <span class="upload-hint">选择视频文件 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+              </span>
+            </button>
+
+            <div class="start-form">
+              <div class="input-shell">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16v12H4z"/><path d="M8 7V5h8v2"/></svg>
+                项目名称（可选）
+              </div>
+              <button class="btn btn-primary" type="button">
+                开始分析
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+              </button>
+            </div>
+
+            <div class="start-foot">
+              <span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>预计 2–4 分钟，可离开页面</span>
+              <span>分析结果自动保存</span>
+            </div>
+          </section>
+
+          <aside class="home-side">
+            <section class="card continue-card" aria-labelledby="continue-title">
+              <div class="continue-kicker"><span>CONTINUE WHERE YOU LEFT</span><span>87s · 24 shots</span></div>
+              <div class="continue-thumb"><span class="thumb-label">01:27</span></div>
+              <h2 id="continue-title">咖啡品牌广告参考</h2>
+              <p>已完成拆解 · 24 个镜头 · 刚刚更新</p>
+              <div class="progress-row"><span>分析完成</span><div class="progress-track"><i></i></div><span>100%</span></div>
+              <a class="btn" href="workspace.html">打开项目工作台 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+            </section>
+
+            <section class="card recent-card" aria-labelledby="recent-title">
+              <div class="panel-head">
+                <div><h2 class="section-title" id="recent-title">最近项目</h2><p class="section-copy">从这里继续上一次的创作。</p></div>
+                <a href="workspace.html">查看全部</a>
+              </div>
+              <div class="project-list">
+                <a class="project-row" href="workspace.html">
+                  <span class="project-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M10 9l5 3-5 3z"/></svg></span>
+                  <span><strong>咖啡品牌广告参考</strong><small>24 镜头 · 87 秒 · 今天 14:32</small></span>
+                  <span class="status-badge">已完成</span>
+                </a>
+                <a class="project-row" href="workspace.html">
+                  <span class="project-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M10 9l5 3-5 3z"/></svg></span>
+                  <span><strong>夏日通勤人物短片</strong><small>18 镜头 · 42 秒 · 昨天 18:10</small></span>
+                  <span class="status-badge">已完成</span>
+                </a>
+                <a class="project-row" href="workspace.html">
+                  <span class="project-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M10 9l5 3-5 3z"/></svg></span>
+                  <span><strong>未来感品牌氛围片</strong><small>正在分析 · 12 秒 · 昨天 16:04</small></span>
+                  <span class="status-badge is-running">分析中</span>
+                </a>
+              </div>
+            </section>
+          </aside>
+        </div>
+
+        <section class="process-strip" aria-label="工作流程">
+          <div class="process-step"><b>01</b><div><strong>上传参考片</strong><span>选一段你想学习的画面。</span></div></div>
+          <div class="process-step"><b>02</b><div><strong>AI 自动拆解</strong><span>镜头、节奏、色调一次整理。</span></div></div>
+          <div class="process-step"><b>03</b><div><strong>生成新方案</strong><span>带着参考结构回到创作。</span></div></div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

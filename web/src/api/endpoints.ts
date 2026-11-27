@@ -1,12 +1,20 @@
 import { api } from "./client";
 import type {
   CostEstimate,
+  GenerationJob,
+  HealthStatus,
   ProjectCost,
   ProjectDetail,
   ProjectSummary,
+  PromptBrief,
+  PromptProject,
   QualityDashboard,
   TimelineMutation,
 } from "./types";
+
+export function fetchHealth(signal?: AbortSignal): Promise<HealthStatus> {
+  return api<HealthStatus>("/healthz", { signal });
+}
 
 export function fetchQuality(days = 30, signal?: AbortSignal): Promise<QualityDashboard> {
   return api<QualityDashboard>(`/api/insights/quality?days=${days}`, { signal });
@@ -93,5 +101,41 @@ export function reanalyzeTimelineShot(
   return api<TimelineMutation>(
     `/api/projects/${encodeURIComponent(projectId)}/shots/${encodeURIComponent(shotId)}/reanalyze`,
     { method: "POST" },
+  );
+}
+
+export function fetchPromptProjects(signal?: AbortSignal): Promise<PromptProject[]> {
+  return api<PromptProject[]>("/api/prompt-projects", { signal });
+}
+
+export function fetchPromptProject(projectId: string, signal?: AbortSignal): Promise<PromptProject> {
+  return api<PromptProject>(`/api/prompt-projects/${encodeURIComponent(projectId)}`, { signal });
+}
+
+export function createPromptProject(brief: PromptBrief): Promise<{ prompt_project_id: string; status: string }> {
+  return api("/api/prompt-projects", {
+    method: "POST",
+    body: JSON.stringify(brief),
+  });
+}
+
+export function regeneratePromptProject(projectId: string): Promise<unknown> {
+  return api(`/api/prompt-projects/${encodeURIComponent(projectId)}/regenerate`, { method: "POST" });
+}
+
+export function fetchGenerationJobs(projectId: string, signal?: AbortSignal): Promise<GenerationJob[]> {
+  return api<GenerationJob[]>(
+    `/api/prompt-projects/${encodeURIComponent(projectId)}/generation-jobs`,
+    { signal },
+  );
+}
+
+export function startGeneration(
+  projectId: string,
+  payload: { shot_indices?: number[]; aspect_ratio?: string; model?: string } = {},
+): Promise<GenerationJob> {
+  return api<GenerationJob>(
+    `/api/prompt-projects/${encodeURIComponent(projectId)}/generation-jobs`,
+    { method: "POST", body: JSON.stringify(payload) },
   );
 }

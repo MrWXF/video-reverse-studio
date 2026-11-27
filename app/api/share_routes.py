@@ -1,6 +1,10 @@
 """Public, token-scoped endpoints for read-only and comment-enabled prompt shares."""
 
+import hashlib
+import threading
+import time
 import uuid
+from collections import deque
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -9,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..config import PROJECT_ROOT
+from ..config import PROJECT_ROOT, get_settings
 from ..db import get_db
 from ..models import PromptComment, PromptShare, PromptVersion
 from ..schemas import CommentCreate
@@ -17,6 +21,37 @@ from ..serializers import comment_payload, prompt_project_payload
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(PROJECT_ROOT / "app" / "templates"))
+
+_comment_lock = threading.Lock()
+_comment_hits: dict[str, deque[float]] = {}
+
+
+def _comment_key(request: Request, token: str) -> str:
+    """Build a bounded rate-limit key without retaining the raw share token."""
+    client = request.client.host if request.client else "unknown"
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
+    return f"{client[:80]}:{digest}"
+
+
+def _comment_retry_after(key: str) -> int:
+    """Return seconds until another comment is allowed, or zero when allowed."""
+    settings = get_settings()
+    now = time.monotonic()
+    cutoff = now - settings.share_comment_window_s
+    with _comment_lock:
+        entries = _comment_hits.setdefault(key, deque())
+        while entries and entries[0] <= cutoff:
+            entries.popleft()
+        if len(entries) < settings.share_comment_limit:
+            entries.append(now)
+            return 0
+        return max(1, int(entries[0] + settings.share_comment_window_s - now) + 1)
+
+
+def reset_comment_limits_for_tests() -> None:
+    """Reset the process-local public-comment rate limiter."""
+    with _comment_lock:
+        _comment_hits.clear()
 
 
 def _utc(value: datetime | None) -> datetime | None:
@@ -97,12 +132,20 @@ def list_shared_comments(token: str, db: Session = Depends(get_db)) -> list[dict
 def create_shared_comment(
     token: str,
     comment: CommentCreate,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> dict:
     """Add a comment when the share token grants comment permission."""
     share = get_active_share(db, token)
     if share.permission != "comment":
         raise HTTPException(status_code=403, detail="该分享链接仅支持只读浏览")
+    retry_after = _comment_retry_after(_comment_key(request, token))
+    if retry_after:
+        raise HTTPException(
+            status_code=429,
+            detail="评论过于频繁，请稍后再试",
+            headers={"Retry-After": str(retry_after)},
+        )
     item = PromptComment(
         id=str(uuid.uuid4()),
         share_id=share.id,

@@ -1,0 +1,144 @@
+.quality-signal-bar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 13px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  box-shadow: var(--panel-shadow);
+}
+
+.quality-signal-bar .quality-live {
+  flex: none;
+  margin: 0;
+}
+
+.quality-signal-bar > div {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.quality-signal-bar strong {
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 18px;
+  font-weight: 760;
+  letter-spacing: -0.035em;
+}
+
+.quality-signal-bar p {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.quality-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.quality-kpi {
+  padding: 16px;
+  border-radius: 16px;
+}
+
+.quality-kpi > span {
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+}
+
+.quality-kpi > strong {
+  margin-top: 6px;
+  font-size: clamp(24px, 2.3vw, 32px);
+}
+
+.quality-kpi > small {
+  margin-top: 7px;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.quality-grid {
+  align-items: start;
+  gap: 16px;
+}
+
+.quality-grid .quality-panel {
+  padding: 22px;
+  border-radius: var(--studio-radius-lg);
+}
+
+.quality-panel-head h2 {
+  font-size: 22px;
+}
+
+.quality-legend {
+  font-size: 9px;
+}
+
+.quality-field-copy strong {
+  font-size: 12px;
+}
+
+.quality-field-copy span {
+  font-size: 9.5px;
+}
+
+.quality-trend-legend {
+  font-size: 9.5px;
+}
+
+.quality-trend-note {
+  font-size: 9.5px;
+  line-height: 1.55;
+}
+
+.quality-project-copy strong {
+  font-size: 12px;
+}
+
+.quality-project-copy small {
+  font-size: 9px;
+}
+
+.quality-project-stats {
+  font-size: 9px;
+}
+
+.quality-project-stats b {
+  font-size: 11px;
+}
+
+.quality-suggestion-list span {
+  font-size: 11px;
+}
+
+.quality-empty {
+  font-size: 11px;
+}
+
+@media (max-width: 860px) {
+  .quality-signal-bar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .quality-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .quality-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .quality-grid .quality-panel {
+    padding: 17px;
+  }
+}

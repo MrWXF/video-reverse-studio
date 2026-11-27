@@ -1,0 +1,69 @@
+[1127/174218.765:ERROR:content\browser\gpu\gpu_process_host.cc:1005] GPU process exited unexpectedly: exit_code=-1073741515
+[1127/174218.765:ERROR:content\browser\gpu\gpu_process_host.cc:1005] GPU process exited unexpectedly: exit_code=-1073741515
+[1127/174218.765:WARNING:content\browser\gpu\gpu_process_host.cc:1447] The GPU process has crashed 1 time(s)
+[1127/174218.765:WARNING:content\browser\gpu\gpu_process_host.cc:1447] The GPU process has crashed 1 time(s)
+[1127/174218.778:ERROR:content\browser\gpu\gpu_process_host.cc:1005] GPU process exited unexpectedly: exit_code=-1073741515
+[1127/174218.778:WARNING:content\browser\gpu\gpu_process_host.cc:1447] The GPU process has crashed 1 time(s)
+[1127/174218.787:ERROR:content\browser\gpu\gpu_process_host.cc:1005] GPU process exited unexpectedly: exit_code=-1073741515
+[1127/174218.788:WARNING:content\browser\gpu\gpu_process_host.cc:1447] The GPU process has crashed 2 time(s)
+[1127/174218.808:ERROR:content\browser\gpu\gpu_process_host.cc:1005] GPU process exited unexpectedly: exit_code=-1073741515
+[1127/174218.808:WARNING:content\browser\gpu\gpu_process_host.cc:1447] The GPU process has crashed 2 time(s)
+[1127/174218.812:ERROR:content\browser\gpu\gpu_process_host.cc:1005] GPU process exited unexpectedly: exit_code=-1073741515
+[1127/174218.812:WARNING:content\browser\gpu\gpu_process_host.cc:1447] The GPU process has crashed 3 time(s)
+[1127/174218.815:ERROR:content\browser\gpu\gpu_process_host.cc:1005] GPU process exited unexpectedly: exit_code=-1073741515
+[1127/174218.815:WARNING:content\browser\gpu\gpu_process_host.cc:1447] The GPU process has crashed 2 time(s)
+[1127/174218.831:ERROR:content\browser\gpu\gpu_process_host.cc:1005] GPU process exited unexpectedly: exit_code=-1073741515
+[1127/174218.831:WARNING:content\browser\gpu\gpu_process_host.cc:1447] The GPU process has crashed 3 time(s)
+[1127/174218.833:ERROR:content\browser\gpu\gpu_process_host.cc:1005] GPU process exited unexpectedly: exit_code=-1073741515
+[1127/174218.833:WARNING:content\browser\gpu\gpu_process_host.cc:1447] The GPU process has crashed 3 time(s)
+[1127/174218.838:ERROR:content\browser\gpu\gpu_process_host.cc:1005] GPU process exited unexpectedly: exit_code=-1073741515
+[1127/174218.839:WARNING:content\browser\gpu\gpu_process_host.cc:1447] The GPU process has crashed 4 time(s)
+[1127/174218.848:ERROR:content\browser\gpu\gpu_process_host.cc:1005] GPU process exited unexpectedly: exit_code=-1073741515
+[1127/174218.848:WARNING:content\browser\gpu\gpu_process_host.cc:1447] The GPU process has crashed 4 time(s)
+[1127/174218.850:ERROR:content\browser\gpu\gpu_process_host.cc:1005] GPU process exited unexpectedly: exit_code=-1073741515
+[1127/174218.850:WARNING:content\browser\gpu\gpu_process_host.cc:1447] The GPU process has crashed 4 time(s)
+[1127/174218.858:ERROR:content\browser\gpu\gpu_process_host.cc:1005] GPU process exited unexpectedly: exit_code=-1073741515
+[1127/174218.858:WARNING:content\browser\gpu\gpu_process_host.cc:1447] The GPU process has crashed 5 time(s)
+[1127/174218.866:ERROR:content\browser\gpu\gpu_process_host.cc:1005] GPU process exited unexpectedly: exit_code=-1073741515
+[1127/174218.866:WARNING:content\browser\gpu\gpu_process_host.cc:1447] The GPU process has crashed 5 time(s)
+[1127/174218.867:ERROR:content\browser\gpu\gpu_process_host.cc:1005] GPU process exited unexpectedly: exit_code=-1073741515
+[1127/174218.867:WARNING:content\browser\gpu\gpu_process_host.cc:1447] The GPU process has crashed 5 time(s)
+[1127/174218.873:ERROR:content\browser\gpu\gpu_process_host.cc:1005] GPU process exited unexpectedly: exit_code=-1073741515
+[1127/174218.873:WARNING:content\browser\gpu\gpu_process_host.cc:1447] The GPU process has crashed 6 time(s)
+[1127/174218.874:FATAL:content\browser\gpu\gpu_data_manager_impl_private.cc:418] GPU process isn't usable. Goodbye.
+[1127/174218.881:ERROR:content\browser\gpu\gpu_process_host.cc:1005] GPU process exited unexpectedly: exit_code=-1073741515
+[1127/174218.881:ERROR:content\browser\gpu\gpu_process_host.cc:1005] GPU process exited unexpectedly: exit_code=-1073741515
+[1127/174218.881:WARNING:content\browser\gpu\gpu_process_host.cc:1447] The GPU process has crashed 6 time(s)
+[1127/174218.881:WARNING:content\browser\gpu\gpu_process_host.cc:1447] The GPU process has crashed 6 time(s)
+[1127/174218.881:FATAL:content\browser\gpu\gpu_data_manager_impl_private.cc:418] GPU process isn't usable. Goodbye.
+[1127/174218.881:FATAL:content\browser\gpu\gpu_data_manager_impl_private.cc:418] GPU process isn't usable. Goodbye.
+[1127/174236.202:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/174236.285:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/174236.285:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/174252.640:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/174252.661:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/174252.661:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/174313.069:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/174313.085:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/174313.085:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/174336.083:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/174336.088:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/174336.131:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/174336.140:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/174336.140:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/174336.146:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/174336.146:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/174336.177:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/174336.178:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/174541.130:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/174541.154:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/174541.154:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/175545.627:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/175545.642:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/175545.642:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/175545.677:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/175545.709:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/175545.739:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/175545.739:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/175545.757:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[1127/175545.757:ERROR:gpu\ipc\service\gpu_channel_manager.cc:927] ContextResult::kFatalFailure: Failed to create shared context for virtualization.

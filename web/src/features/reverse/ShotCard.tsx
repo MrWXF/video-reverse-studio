@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
 import type { ProjectDetail, Shot } from "../../api/types";
 import { useUiStore } from "../../store/uiStore";
@@ -62,7 +63,7 @@ export function ShotCard({ shot, position, project }: { shot: Shot; position: nu
           <div className="meta-item"><span>ORIGIN</span><strong>{ORIGIN_LABELS[shot.origin] || shot.origin || "—"}</strong></div>
         </div>
         <div className="shot-actions">
-          <a className="btn btn-ghost" href={`/generate?reference=${encodeURIComponent(project.id)}&mode=full`}>用此镜头生成 ↗</a>
+          <Link className="btn btn-ghost" to={`/generate?reference=${encodeURIComponent(project.id)}&mode=full`}>用此镜头生成 ↗</Link>
         </div>
         <div className="shot-foot">
           <div className="palette-dots">
