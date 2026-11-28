@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>ReelReverse 重设计 · 三稿对比</title>
+<style>
+body{background:#0B0B10;color:#EDEDF4;font-family:"PingFang SC","Microsoft YaHei",system-ui;display:flex;flex-wrap:wrap;gap:20px;padding:40px;align-items:flex-start}
+a.card{display:block;width:360px;background:#14141D;border:1px solid rgba(255,255,255,.08);border-radius:18px;overflow:hidden;text-decoration:none;color:inherit;transition:.18s}
+a.card:hover{transform:translateY(-4px);border-color:rgba(124,106,255,.5)}
+.ph{height:200px;display:grid;place-items:center;font-size:40px}
+.a{background:radial-gradient(120% 120% at 30% 20%,#1E2340,#101018)}
+.b{background:radial-gradient(120% 120% at 30% 20%,#3A2340,#121320)}
+.c{background:radial-gradient(120% 120% at 30% 20%,#16233A,#0E1014)}
+.meta{padding:16px 18px}
+.meta b{font-size:16px}
+.meta p{color:#8E8EA0;font-size:12.5px;margin-top:7px;line-height:1.7}
+h1{width:100%;font-size:20px;margin:0 0 6px}
+p.lead{width:100%;color:#8E8EA0;font-size:13px;margin:0 0 8px}
+</style>
+</head>
+<body>
+<h1>ReelReverse 前端重设计 · 三稿对比（即梦 AI 风格方向）</h1>
+<p class="lead">点击任一卡片查看完整高保真稿 → 浏览器打开后可交互（hover 效果）</p>
+<a class="card" href="mockup-a.html"><div class="ph a">🏠</div><div class="meta"><b>稿A · 即梦经典暗色</b><p>左侧图标导航栏 + 居中 AI 大输入区 + 渐变 CTA + 项目画廊。最接近即梦 App 的「创作优先」布局，弱化工具感、强调上传与生成。</p></div></a>
+<a class="card" href="mockup-b.html"><div class="ph b">🪟</div><div class="meta"><b>稿B · 顶部导航 + 玻璃拟态</b><p>顶部胶囊导航 + 毛玻璃卡片 + 粉紫渐变 + 成本预估侧栏。偏即梦网页版，信息更紧凑，上传与预估并排一步完成。</p></div></a>
+<a class="card" href="mockup-c.html"><div class="ph c">🎛️</div><div class="meta"><b>稿C · 专业工作台三栏</b><p>项目列表 + 播放器/时间轴 + 镜头检查器。面向时间轴重度编辑场景的 Pro 工具布局，密度高、操作路径最短。</p></div></a>
+</body>
+</html>

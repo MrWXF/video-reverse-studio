@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>稿C · 专业工作台三栏 — 面向时间轴重操作</title>
+<style>
+:root{
+  --bg:#0A0A0E; --panel:#121218; --panel2:#17171F; --line:#23232E; --line2:#2C2C3A;
+  --txt:#EDEDF4; --sub:#7E7E92; --acc:#5B8CFF; --acc2:#8B7CFF;
+  --grad:linear-gradient(180deg,#5B8CFF,#8B7CFF);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--txt);font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;height:100vh;display:flex;overflow:hidden;font-size:13px}
+/* 顶部工具条 */
+.top{height:52px;background:var(--panel);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;padding:0 18px;flex-shrink:0}
+.brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:15px}
+.brand .mk{width:28px;height:28px;border-radius:8px;background:var(--grad);display:grid;place-items:center;font-size:15px}
+.tnav{display:flex;gap:2px;margin-left:12px}
+.tnav a{color:var(--sub);text-decoration:none;padding:7px 15px;border-radius:9px;font-size:13px}
+.tnav a.on{color:#fff;background:var(--panel2)}
+.sp{flex:1}
+.pill{color:var(--sub);font-size:12px;display:flex;align-items:center;gap:6px}
+.pill i{width:6px;height:6px;border-radius:50%;background:#34D399;box-shadow:0 0 7px #34D399}
+.cta{border:none;background:var(--grad);color:#fff;font-weight:600;font-size:13px;padding:8px 18px;border-radius:9px;cursor:pointer}
+/* 三栏 */
+.body{flex:1;display:flex;min-height:0}
+.left{width:250px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;flex-shrink:0}
+.left .hd{padding:14px 16px 10px;display:flex;justify-content:space-between;align-items:center;color:var(--sub);font-size:12px}
+.left .hd b{color:var(--txt);font-size:13px}
+.left .new{margin:0 12px 12px;padding:14px;border:1px dashed var(--line2);border-radius:11px;text-align:center;color:var(--sub);cursor:pointer;transition:.15s}
+.left .new:hover{border-color:var(--acc);color:#fff;background:rgba(91,140,255,.07)}
+.proj{padding:11px 14px;margin:2px 8px;border-radius:10px;cursor:pointer;display:flex;gap:11px;align-items:center}
+.proj:hover{background:var(--panel2)}
+.proj.on{background:var(--panel2);box-shadow:inset 2px 0 0 var(--acc)}
+.proj .th{width:52px;height:34px;border-radius:6px;background:radial-gradient(120% 120% at 30% 20%,#2A2A3E,#16161F);display:grid;place-items:center;font-size:15px;flex-shrink:0}
+.proj b{display:block;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.proj small{color:var(--sub);font-size:11px}
+.center{flex:1;display:flex;flex-direction:column;min-width:0}
+/* 播放器 + 时间轴 */
+.player{flex:1;display:grid;place-items:center;background:radial-gradient(700px 380px at 50% 40%,#15151E,#0A0A0E);position:relative}
+.frame{width:min(560px,72%);aspect-ratio:16/9;border-radius:12px;background:radial-gradient(120% 120% at 30% 20%,#23233A,#111119);display:grid;place-items:center;font-size:44px;box-shadow:0 18px 60px rgba(0,0,0,.5)}
+.ov{position:absolute;top:14px;left:16px;display:flex;gap:8px}
+.chip{font-size:11px;color:#C9C9DB;background:rgba(10,10,14,.65);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:99px;padding:4px 11px}
+/* 时间轴 */
+.tl{background:var(--panel);border-top:1px solid var(--line);padding:12px 16px;flex-shrink:0}
+.tl .hd{display:flex;justify-content:space-between;color:var(--sub);font-size:11px;margin-bottom:9px}
+.tl .hd b{color:var(--txt)}
+.tracks{display:flex;flex-direction:column;gap:7px}
+.track{display:flex;align-items:center;gap:8px}
+.track .nm{width:58px;color:var(--sub);font-size:11px;flex-shrink:0}
+.segs{flex:1;display:flex;gap:4px;height:30px}
+.seg{border-radius:6px;display:grid;place-items:center;font-size:11px;color:#0A0A0E;font-weight:700;flex:1;position:relative;cursor:pointer;border:1px solid transparent}
+.seg:hover{border-color:#fff}
+.seg.s1{flex:1.1;background:linear-gradient(180deg,#7FA8FF,#5B8CFF)}
+.seg.s2{flex:2;background:linear-gradient(180deg,#B9A8FF,#8B7CFF)}
+.seg.s3{flex:1.4;background:linear-gradient(180deg,#8AE3C8,#4FCBA0)}
+.seg.s4{flex:1;background:linear-gradient(180deg,#FFD08A,#F5B455)}
+.playbar{display:flex;align-items:center;gap:12px;margin-bottom:11px}
+.pb{width:34px;height:34px;border-radius:50%;background:var(--grad);border:none;color:#fff;font-size:13px;cursor:pointer}
+.t{color:var(--sub);font-size:11px;font-variant-numeric:tabular-nums}
+.zbar{flex:1;height:3px;border-radius:2px;background:var(--line2);position:relative}
+.zbar i{position:absolute;left:38%;width:32%;height:3px;background:var(--acc);border-radius:2px}
+/* 右侧检查器 */
+.right{width:300px;background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;flex-shrink:0;padding:16px}
+.right h3{font-size:13px;margin-bottom:4px}
+.right .sub{color:var(--sub);font-size:11.5px;margin-bottom:14px}
+.kv{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);font-size:12.5px}
+.kv span{color:var(--sub)}
+.sec{margin-top:18px}
+.sec h4{font-size:11px;color:var(--sub);letter-spacing:1px;margin-bottom:8px}
+.promptbox{background:var(--panel2);border:1px solid var(--line2);border-radius:10px;padding:12px;font-size:12px;line-height:1.8;color:#CFCFDD}
+.acts{display:flex;gap:8px;margin-top:14px}
+.b1{flex:1;border:none;background:var(--grad);color:#fff;font-size:12px;font-weight:600;padding:9px;border-radius:9px;cursor:pointer}
+.b2{border:1px solid var(--line2);background:transparent;color:var(--txt);font-size:12px;padding:9px 13px;border-radius:9px;cursor:pointer}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.tags i{font-style:normal;font-size:11px;color:var(--acc2);background:rgba(139,124,255,.12);border-radius:6px;padding:3px 9px}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="mk">🎬</span>ReelReverse</div>
+  <nav class="tnav"><a class="on" href="#">逆向工作台</a><a href="#">提示词</a><a href="#">质量</a></nav>
+  <span class="sp"></span>
+  <span class="pill"><i></i>服务在线 · 2 任务运行中</span>
+  <button class="cta">＋ 新建分析</button>
+</header>
+<div class="body">
+  <aside class="left">
+    <div class="hd"><b>项目</b><span>12</span></div>
+    <div class="new">＋ 上传视频新建</div>
+    <div class="proj on"><div class="th">🎞️</div><div><b>护肤品广告片拆解</b><small>12 镜 · 已完成</small></div></div>
+    <div class="proj"><div class="th">🎬</div><div><b>汽车运镜参考</b><small>分析中 75%</small></div></div>
+    <div class="proj"><div class="th">🍽️</div><div><b>美食探店爆款节奏</b><small>8 镜 · 已完成</small></div></div>
+    <div class="proj"><div class="th">🖼️</div><div><b>国风转场合集</b><small>6 镜 · 已完成</small></div></div>
+  </aside>
+  <main class="center">
+    <section class="player">
+      <div class="ov"><span class="chip">镜头 3 / 12</span><span class="chip">00:06.2 – 00:09.8</span><span class="chip">置信度 0.86</span></div>
+      <div class="frame">🎥</div>
+    </section>
+    <section class="tl">
+      <div class="playbar"><button class="pb">▶</button><span class="t">00:06.2</span><div class="zbar"><i></i></div><span class="t">00:32.0</span></div>
+      <div class="tracks">
+        <div class="track"><span class="nm">分镜</span><div class="segs"><span class="seg s1">1</span><span class="seg s2">2</span><span class="seg s3">3</span><span class="seg s4">4</span></div></div>
+        <div class="track"><span class="nm">对齐台词</span><div class="segs"><span class="seg s2" style="flex:2;background:#2A2A3E;color:#8E8EA3">…产品特写出现…</span><span class="seg s3" style="flex:1.4;background:#2A2A3E;color:#8E8EA3"></span><span class="seg s4" style="flex:1;background:#2A2A3E;color:#8E8EA3"></span></div></div>
+      </div>
+      <div class="hd" style="margin-top:9px"><span>拖动边界调整 · 双击拆分 · 合并相邻</span><b>00:32 总时长</b></div>
+    </section>
+  </main>
+  <aside class="right">
+    <h3>镜头 3 · 中景推进</h3>
+    <div class="sub">AI 生成来源 · 置信度 0.86</div>
+    <div class="kv"><span>景别</span><b>中景</b></div>
+    <div class="kv"><span>运镜</span><b>缓推</b></div>
+    <div class="kv"><span>时长</span><b>3.6s</b></div>
+    <div class="sec"><h4>复刻提示词</h4><div class="promptbox">中景缓推，柔和顶光打亮产品主体，浅景深背景虚化，节奏与上镜衔接，收尾定格 0.4s 供字幕浮现…</div></div>
+    <div class="sec"><h4>标签</h4><div class="tags"><i>产品特写</i><i>缓推</i><i>浅景深</i><i>顶光</i></div></div>
+    <div class="acts"><button class="b1">送入提示词工作台</button><button class="b2">重分析</button></div>
+  </aside>
+</div>
+</body>
+</html>

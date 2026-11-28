@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ReelReverse · API 文档</title>
+<meta name="description" content="ReelReverse 视频逆向与提示词生成工作台 API 参考" />
+<style>
+  :root {
+    --bg: #0b0b10;
+    --surface: #14141d;
+    --surface-soft: #1a1a26;
+    --surface-code: #101018;
+    --line: rgba(255, 255, 255, 0.07);
+    --line-strong: rgba(255, 255, 255, 0.13);
+    --ink: #f2f2f7;
+    --body-text: #c9c9db;
+    --muted: #8e8ea0;
+    --accent: #7c6aff;
+    --accent-2: #4e7cff;
+    --accent-3: #38bdf8;
+    --accent-gradient: linear-gradient(96deg, #7c6aff 0%, #4e7cff 55%, #38bdf8 100%);
+    --get: #34d399;
+    --post: #7c6aff;
+    --patch: #fbbf24;
+    --delete: #f87171;
+    --mono: "SFMono-Regular", ui-monospace, "Cascadia Code", Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(900px 520px at 12% -8%, rgba(124, 106, 255, 0.09), transparent 60%),
+      radial-gradient(800px 500px at 96% 4%, rgba(56, 189, 248, 0.06), transparent 55%),
+      var(--bg);
+    color: var(--body-text);
+    font-family: var(--sans);
+    font-size: 14.5px;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: rgba(124, 106, 255, 0.35); }
+
+  /* ---------- layout ---------- */
+  .shell { display: flex; min-height: 100vh; }
+  .side {
+    position: sticky; top: 0; z-index: 30;
+    width: 268px; height: 100vh; flex: none;
+    display: flex; flex-direction: column;
+    padding: 22px 14px 18px;
+    border-right: 1px solid var(--line);
+    background: rgba(16, 16, 24, 0.85);
+    backdrop-filter: blur(16px);
+  }
+  .main { flex: 1; min-width: 0; padding: 44px 48px 120px; }
+  .content { max-width: 880px; margin: 0 auto; }
+
+  /* ---------- sidebar ---------- */
+  .brand { display: flex; align-items: center; gap: 11px; padding: 0 10px 18px; border-bottom: 1px solid var(--line); }
+  .brand-logo {
+    width: 36px; height: 36px; border-radius: 11px; flex: none;
+    display: grid; place-items: center; background: var(--accent-gradient);
+    color: #fff; font-weight: 800; font-size: 15px;
+    box-shadow: 0 6px 18px rgba(124, 106, 255, 0.35);
+  }
+  .brand b { color: var(--ink); font-size: 15px; letter-spacing: 0.2px; }
+  .brand small { display: block; color: var(--muted); font-size: 11px; margin-top: 1px; }
+  .side-search { position: relative; margin: 16px 6px 14px; }
+  .side-search input {
+    width: 100%; padding: 9px 12px 9px 34px;
+    border-radius: 10px; border: 1px solid var(--line-strong);
+    background: var(--surface-code); color: var(--ink);
+    font: inherit; font-size: 13px; outline: none;
+  }
+  .side-search input:focus { border-color: rgba(124, 106, 255, 0.55); box-shadow: 0 0 0 3px rgba(124, 106, 255, 0.15); }
+  .side-search input::placeholder { color: var(--muted); }
+  .side-search svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+  .side-search kbd {
+    position: absolute; right: 9px; top: 50%; transform: translateY(-50%);
+    color: var(--muted); font: 600 10px var(--mono);
+    border: 1px solid var(--line-strong); border-radius: 5px; padding: 2px 5px;
+  }
+  .side-nav { flex: 1; overflow-y: auto; padding: 2px 4px 12px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.14) transparent; }
+  .nav-group { margin-bottom: 16px; }
+  .nav-group > p {
+    margin: 0 0 5px; padding: 0 10px;
+    color: var(--muted); font-size: 10.5px; font-weight: 700;
+    letter-spacing: 0.14em; text-transform: uppercase;
+  }
+  .nav-link {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; border-radius: 8px;
+    color: var(--body-text); text-decoration: none; font-size: 13px;
+    border-left: 2px solid transparent;
+  }
+  .nav-link:hover { background: rgba(255, 255, 255, 0.04); color: var(--ink); }
+  .nav-link.is-active { background: rgba(124, 106, 255, 0.12); color: var(--ink); border-left-color: var(--accent); }
+  .nav-link .cnt { margin-left: auto; color: var(--muted); font: 600 10px var(--mono); }
+  .side-foot { border-top: 1px solid var(--line); padding: 14px 10px 0; display: grid; gap: 7px; }
+  .side-foot a {
+    display: flex; align-items: center; justify-content: space-between;
+    color: var(--body-text); text-decoration: none; font-size: 12.5px;
+  }
+  .side-foot a:hover { color: var(--ink); }
+  .side-foot a span { color: var(--muted); font: 600 10px var(--mono); }
+
+  /* ---------- content ---------- */
+  .eyebrow { color: var(--accent); font: 700 11px var(--mono); letter-spacing: 0.22em; margin: 0 0 10px; }
+  h1 { color: var(--ink); font-size: 34px; line-height: 1.25; margin: 0 0 10px; letter-spacing: -0.01em; }
+  h1 em { font-style: normal; background: var(--accent-gradient); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lede { font-size: 15.5px; max-width: 640px; margin: 0 0 22px; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 34px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 11px; border-radius: 999px;
+    border: 1px solid var(--line-strong); background: var(--surface);
+    color: var(--body-text); font-size: 12px;
+  }
+  .chip b { color: var(--ink); font-weight: 650; }
+  .chip i { width: 7px; height: 7px; border-radius: 50%; background: var(--get); }
+
+  .section { margin: 0 0 46px; scroll-margin-top: 20px; }
+  .section-head { display: flex; align-items: baseline; gap: 12px; border-bottom: 1px solid var(--line); padding-bottom: 12px; margin-bottom: 20px; }
+  .section-head h2 { color: var(--ink); font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  .section-head .idx { color: var(--muted); font: 700 12px var(--mono); }
+  .section-head .desc { color: var(--muted); font-size: 13px; margin-left: auto; text-align: right; }
+
+  .card {
+    border: 1px solid var(--line); border-radius: 14px;
+    background: var(--surface); padding: 18px 20px; margin-bottom: 14px;
+    scroll-margin-top: 20px;
+  }
+  .card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .method {
+    flex: none; min-width: 62px; text-align: center;
+    font: 700 10.5px var(--mono); letter-spacing: 0.08em;
+    padding: 4px 8px; border-radius: 6px;
+  }
+  .m-get { color: var(--get); background: rgba(52, 211, 153, 0.12); border: 1px solid rgba(52, 211, 153, 0.3); }
+  .m-post { color: #b7a9ff; background: rgba(124, 106, 255, 0.14); border: 1px solid rgba(124, 106, 255, 0.38); }
+  .m-patch { color: var(--patch); background: rgba(251, 184, 36, 0.1); border: 1px solid rgba(251, 184, 36, 0.3); }
+  .m-delete { color: var(--delete); background: rgba(248, 113, 113, 0.1); border: 1px solid rgba(248, 113, 113, 0.3); }
+  .path { color: var(--ink); font: 600 13.5px var(--mono); word-break: break-all; }
+  .path .pvar { color: var(--accent-3); }
+  .copy-btn {
+    margin-left: auto; flex: none; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px;
+    border: 1px solid var(--line-strong); border-radius: 7px;
+    background: transparent; color: var(--muted);
+    font: 600 11px var(--sans); padding: 4px 9px;
+  }
+  .copy-btn:hover { color: var(--ink); border-color: rgba(124, 106, 255, 0.5); }
+  .copy-btn.ok { color: var(--get); border-color: rgba(52, 211, 153, 0.45); }
+  .card-title { color: var(--ink); font-weight: 650; font-size: 14px; margin: 10px 0 2px; }
+  .card-desc { font-size: 13.5px; margin: 0; }
+  .card-desc code, .prose code {
+    font: 550 12px var(--mono); color: var(--accent-3);
+    background: rgba(56, 189, 248, 0.08);
+    border: 1px solid rgba(56, 189, 248, 0.16);
+    border-radius: 5px; padding: 1px 5px;
+  }
+
+  table.params { width: 100%; border-collapse: collapse; margin: 12px 0 4px; font-size: 12.5px; }
+  table.params th {
+    text-align: left; color: var(--muted); font-size: 10.5px; letter-spacing: 0.1em;
+    padding: 6px 10px; border-bottom: 1px solid var(--line); font-weight: 700;
+  }
+  table.params td { padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.params tr:last-child td { border-bottom: 0; }
+  table.params td:first-child { font: 550 12px var(--mono); color: var(--ink); white-space: nowrap; }
+  table.params .opt { color: var(--muted); font-size: 11px; }
+  table.params .req { color: var(--patch); font-size: 11px; }
+
+  .codeblock { position: relative; margin: 12px 0 2px; }
+  .codeblock-label {
+    position: absolute; top: 10px; right: 10px; z-index: 2;
+    color: #a9a9bd; font: 700 9.5px var(--mono); letter-spacing: 0.12em;
+  }
+  .codeblock pre {
+    margin: 0; padding: 14px 16px; overflow-x: auto;
+    background: var(--surface-code); border: 1px solid var(--line);
+    border-radius: 10px; scrollbar-width: thin;
+  }
+  .codeblock pre code { font: 500 12.5px/1.7 var(--mono); color: #c4c9e4; white-space: pre; }
+  .tok-k { color: #b7a9ff; }      /* key */
+  .tok-s { color: #7ee2b8; }      /* string */
+  .tok-n { color: #fbbf24; }      /* number */
+  .tok-c { color: #5b5b70; }      /* comment */
+  .tok-m { color: #38bdf8; font-weight: 700; } /* method */
+
+  .prose p { margin: 0 0 12px; }
+  .prose h3 { color: var(--ink); font-size: 16.5px; margin: 26px 0 10px; }
+  .prose ul { margin: 0 0 12px; padding-left: 20px; }
+  .prose li { margin-bottom: 6px; }
+  .note {
+    display: flex; gap: 10px; align-items: flex-start;
+    border: 1px solid rgba(124, 106, 255, 0.28); border-radius: 12px;
+    background: rgba(124, 106, 255, 0.07); padding: 13px 16px;
+    font-size: 13px; margin: 14px 0;
+  }
+  .note.warn { border-color: rgba(251, 184, 36, 0.3); background: rgba(251, 184, 36, 0.06); }
+  .note b { color: var(--ink); }
+  .note .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-gradient); margin-top: 8px; }
+  .note.warn .dot { background: var(--patch); }
+
+  .flow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 18px 0; }
+  .flow div {
+    border: 1px solid var(--line); border-radius: 12px; background: var(--surface-soft);
+    padding: 14px 16px;
+  }
+  .flow span { color: var(--accent); font: 700 11px var(--mono); }
+  .flow b { display: block; color: var(--ink); font-size: 13.5px; margin: 3px 0 4px; }
+  .flow small { color: var(--muted); font-size: 12px; line-height: 1.6; display: block; }
+
+  .no-results {
+    display: none; text-align: center; padding: 60px 0; color: var(--muted);
+    border: 1px dashed var(--line-strong); border-radius: 14px;
+  }
+  .no-results b { display: block; color: var(--ink); font-size: 15px; margin-bottom: 4px; }
+  .docs-foot { border-top: 1px solid var(--line); margin-top: 50px; padding-top: 20px; color: var(--muted); font-size: 12.5px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+  .docs-foot a { color: var(--body-text); }
+
+  .menu-btn { display: none; }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 1020px) {
+    .side { position: fixed; left: 0; top: 0; transform: translateX(-100%); transition: transform 0.25s ease; box-shadow: 0 0 60px rgba(0,0,0,.5); }
+    .side.open { transform: translateX(0); }
+    .main { padding: 24px 20px 100px; }
+    .menu-btn {
+      display: inline-flex; position: fixed; right: 18px; bottom: 18px; z-index: 40;
+      width: 48px; height: 48px; border-radius: 50%; border: 0; cursor: pointer;
+      background: var(--accent-gradient); color: #fff;
+      box-shadow: 0 10px 26px rgba(124, 106, 255, 0.4);
+      align-items: center; justify-content: center;
+    }
+    .flow { grid-template-columns: 1fr; }
+    .section-head .desc { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .side { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="side" id="side">
+    <div class="brand">
+      <span class="brand-logo">RR</span>
+      <div><b>ReelReverse</b><small>API 文档 · v0.2.0</small></div>
+    </div>
+    <div class="side-search">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="search" placeholder="搜索接口…" autocomplete="off" />
+      <kbd>/</kbd>
+    </div>
+    <nav class="side-nav" id="nav"></nav>
+    <div class="side-foot">
+      <a href="/openapi.json" target="_blank" rel="noreferrer">OpenAPI 规范 <span>JSON</span></a>
+      <a href="/app" >返回工作台 <span>→</span></a>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="content">
+      <p class="eyebrow">REELREVERSE API REFERENCE</p>
+      <h1>把接口写成<em>可以照着抄的文档</em></h1>
+      <p class="lede">视频逆向 · 提示词生成 · 视频生成 · 质量观测，全部能力都从这里出发。每个接口都给出路径、参数与可直接复制的请求示例。</p>
+      <div class="meta-row">
+        <span class="chip"><i></i>服务在线时免登录（未配置 <b>APP_PASSWORD</b>）</span>
+        <span class="chip">Base URL <b>/api</b>（兼容）· <b>/api/v1</b>（正式）</span>
+        <span class="chip">共 <b id="ep-total">0</b> 个接口</span>
+      </div>
+
+      <div class="section prose" id="sec-overview">
+        <div class="section-head"><span class="idx">00</span><h2>快速开始</h2></div>
+        <h3>一分钟跑通核心流程</h3>
+        <div class="flow">
+          <div><span>STEP 01</span><b>上传并分析</b><small><code>POST /api/projects</code> 上传视频，返回 project_id 与 job_id。</small></div>
+          <div><span>STEP 02</span><b>订阅进度</b><small><code>GET /api/jobs/{id}/events</code> SSE 实时推送，完成即拿到分镜。</small></div>
+          <div><span>STEP 03</span><b>生成提示词</b><small><code>POST /api/prompt-projects</code> 用创意简报生成逐镜配方。</small></div>
+        </div>
+        <h3>认证</h3>
+        <p>默认部署（未配置 <code>APP_PASSWORD</code>）所有接口免登录。配置密码后，除 <code>/healthz</code> 与分享链路外，业务接口均要求 HTTP Basic 认证：</p>
+        <div class="codeblock"><span class="codeblock-label">SHELL</span><pre><code>curl -u admin:你的密码 http://127.0.0.1:8000/api/projects</code></pre></div>
+        <div class="note"><span class="dot"></span><div><b>双入口说明：</b><code>/api/*</code> 为兼容入口，<code>/api/v1/*</code> 为正式版本入口，两者共享同一套 v1 语义，可任选其一。</div></div>
+        <h3>通用约定</h3>
+        <ul>
+          <li>长任务（分析 / 提示词 / 生成）均为<b>异步队列模型</b>：创建接口立即返回，随后通过任务接口或 SSE 轮询 / 订阅进度。</li>
+          <li>SSE 事件流：<code>Content-Type: text/event-stream</code>，<code>data:</code> 载荷为 JSON，包含 <code>status</code>、<code>step</code>、<code>progress</code> 等字段。</li>
+          <li>错误统一为 <code>{"detail": "中文错误说明", "request_id": "…"}</code>；并发达到上限返回 <code>503</code>，稍后重试即可。</li>
+          <li>上传上限由 <code>MAX_UPLOAD_MB</code> 控制（默认 512MB），超限返回 <code>413</code>。</li>
+        </ul>
+      </div>
+
+      <div class="no-results" id="no-results"><b>没有匹配的接口</b>换个关键词试试，比如 project、prompt、share。</div>
+      <div id="sections"></div>
+
+      <div class="docs-foot">
+        <span>ReelReverse · 视频逆向与提示词生成工作台</span>
+        <span>交互式调试可查看 <a href="/openapi.json" target="_blank" rel="noreferrer">OpenAPI 规范</a> · <a href="/app">打开工作台</a></span>
+      </div>
+    </div>
+  </main>
+</div>
+
+<button class="menu-btn" id="menu" aria-label="打开导航">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+</button>
+
+<script>
+/* =============== 数据 =============== */
+const API = [
+  {
+    id: "system", title: "系统状态", desc: "健康检查与容量",
+    items: [
+      { m: "GET", p: "/healthz", t: "健康检查", d: "返回数据库 / ffmpeg / LLM 配置状态、并发任务数与队列容量。公开接口，免认证，适合探活。",
+        res: `{
+  "status": "ok",
+  "llm_provider": "dashscope",
+  "llm_enabled": true,
+  "analysis_mode": "live",
+  "auth_enabled": false,
+  "database": "ok",
+  "ffmpeg": true,
+  "api_version": "v1",
+  "max_upload_mb": 512,
+  "active_jobs": { "analysis": 1, "prompt": 0, "generation": 0 },
+  "queue": { "analysis": 0 }
+}` },
+    ],
+  },
+  {
+    id: "analysis", title: "视频逆向分析", desc: "上传 · 分镜 · 时间轴编辑",
+    items: [
+      { m: "POST", p: "/api/projects", t: "上传视频创建项目", d: "multipart 上传视频并启动完整分析管线：分镜检测 → 关键帧抽取 → 逐镜视觉分析 → 配方生成。支持 MP4 / MOV / WebM / MKV / AVI / M4V，服务端校验文件头。",
+        params: [["file", "file", 1, "视频文件（≤ 512MB）"], ["title", "string", 0, "项目名，默认取文件名"]],
+        curl: `curl -X POST http://127.0.0.1:8000/api/projects \\
+  -F "file=@demo.mp4" \\
+  -F "title=香水瓶广告"`,
+        res: `{ "project_id": "8f3c…", "job_id": "a1b2…", "status": "queued" }`,
+        errs: "400 格式不合法 · 413 超过大小限制 · 503 并发已达上限" },
+      { m: "GET", p: "/api/projects", t: "项目列表", d: "按创建时间倒序，含每个项目最近一次任务的摘要与镜头数。" },
+      { m: "GET", p: "/api/projects/{project_id}", t: "项目详情", d: "项目元信息、完整镜头列表、任务状态与时间轴数据。" },
+      { m: "DELETE", p: "/api/projects/{project_id}", t: "删除项目", d: "删除项目记录与磁盘上的媒体目录（仅限受管项目根目录内）。" },
+      { m: "POST", p: "/api/projects/{project_id}/analyze", t: "重新分析项目", d: "对已有项目重跑完整分析管线，生成新的任务。" },
+      { m: "POST", p: "/api/projects/{project_id}/cancel", t: "取消分析", d: "取消排队中或运行中的分析任务（202 返回）。无可取消任务时返回 409。",
+        res: `{ "project_id": "8f3c…", "job_id": "a1b2…", "status": "cancelled" }` },
+      { m: "GET", p: "/api/projects/{project_id}/video", t: "源视频流", d: "以文件流返回上传的原始视频。" },
+      { m: "GET", p: "/api/projects/{project_id}/recipe", t: "下载配方", d: "下载生成的逆向配方。format=md（默认）或 json。配方未生成时返回 404。",
+        params: [["format", "string", 0, "md | json，默认 md"]] },
+      { m: "GET", p: "/api/projects/{project_id}/reference-context", t: "参考上下文", d: "输出项目的风格 / 结构参考摘要，供提示词项目的 reference 使用。" },
+      { m: "PATCH", p: "/api/projects/{project_id}/shots/{shot_id}", t: "修正镜头分析", d: "部分更新单个镜头的 AI 分析结果，未传字段保持不变。可改景别、运镜、主体、场景、光线、色彩、提示词等。",
+        params: [["shot_id", "integer", 1, "镜头序号（从 1 开始）"]],
+        res: `// 返回更新后的完整镜头对象
+{ "id": 12, "shot_type": "特写", "camera_movement": "缓推", … }` },
+      { m: "PATCH", p: "/api/projects/{project_id}/shots/{shot_id}/boundary", t: "调整镜头边界", d: "移动该镜头与下一镜的交界时间点，相邻两镜时长随之联动。",
+        body: `{"boundary_s": 4.25}` },
+      { m: "POST", p: "/api/projects/{project_id}/shots/{shot_id}/split", t: "拆分镜头", d: "在指定时间点把一个镜头拆成两个，并分别重抽关键帧。",
+        body: `{"split_at": 3.8}` },
+      { m: "POST", p: "/api/projects/{project_id}/shots/merge", t: "合并相邻镜头", d: "把两个相邻镜头合并为一个，shot_ids 必须恰好两项。",
+        body: `{"shot_ids": [3, 4]}` },
+      { m: "POST", p: "/api/projects/{project_id}/shots/{shot_id}/reanalyze", t: "重抽关键帧并重析", d: "对该镜头重抽关键帧并重新调用视觉分析，覆盖原结果。" },
+      { m: "GET", p: "/api/projects/{project_id}/shots/{shot_id}/keyframe", t: "关键帧图片", d: "返回该镜头的关键帧 JPEG。" },
+      { m: "GET", p: "/api/jobs/{job_id}", t: "任务状态", d: "返回任务状态、进度百分比、耗时与 token 指标。",
+        res: `{ "job_id": "a1b2…", "status": "running", "step": "shot_analysis", "progress": 0.62 }` },
+      { m: "GET", p: "/api/jobs/{job_id}/events", t: "任务事件流（SSE）", d: "以 Server-Sent Events 推送任务状态变化，直到终态自动关闭。",
+        curl: `curl -N http://127.0.0.1:8000/api/jobs/a1b2…/events
+
+// 前端
+const es = new EventSource("/api/jobs/" + jobId + "/events");
+es.onmessage = (e) => console.log(JSON.parse(e.data));` },
+    ],
+  },
+  {
+    id: "prompt", title: "提示词工作台", desc: "简报 → 逐镜配方",
+    items: [
+      { m: "POST", p: "/api/prompt-projects", t: "创建提示词项目", d: "根据创意简报生成逐镜视频提示词，可关联已完成的逆向项目作为风格或结构参考（reference_mode：style / structure / hybrid）。",
+        body: `{
+  "idea": "30 秒香水瓶广告，强调玻璃质感与光影流动",
+  "target_model": "jimeng",
+  "language": "zh",
+  "duration_s": 15,
+  "aspect_ratio": "16:9",
+  "shot_count": 4,
+  "style": "高级感、极简、冷色调",
+  "reference_project_id": "8f3c…",
+  "reference_mode": "style",
+  "entity_bible": {
+    "characters": [{ "name": "主角", "appearance": "长发女性，白裙" }],
+    "consistency_rules": ["瓶身标签始终朝向镜头"]
+  }
+}`,
+        res: `{ "prompt_project_id": "c7d8…", "status": "queued" }`,
+        errs: "409 参考项目尚未完成分析 · 503 并发已达上限" },
+      { m: "GET", p: "/api/prompt-projects", t: "提示词项目列表", d: "按创建时间倒序的方案列表。" },
+      { m: "GET", p: "/api/prompt-projects/{project_id}", t: "提示词项目详情", d: "含逐镜 PromptShot（时间码、景别、提示词、负面提示、转场、锁定字段等）。" },
+      { m: "DELETE", p: "/api/prompt-projects/{project_id}", t: "删除提示词项目", d: "删除方案及其衍生的版本数据。" },
+      { m: "POST", p: "/api/prompt-projects/{project_id}/regenerate", t: "重新生成（202）", d: "基于当前简报与实体圣经重新生成全部镜头提示词。" },
+      { m: "POST", p: "/api/prompt-projects/{project_id}/cancel", t: "取消生成（202）", d: "取消排队或运行中的提示词任务。" },
+      { m: "GET", p: "/api/prompt-projects/{project_id}/events", t: "生成事件流（SSE）", d: "订阅提示词生成进度，语义同任务事件流。" },
+      { m: "PATCH", p: "/api/prompt-projects/{project_id}/shots/{shot_index}", t: "编辑单镜", d: "部分更新某一镜的提示词字段；写入 locked_fields 可锁定字段不被重生成覆盖。",
+        params: [["shot_index", "integer", 1, "镜头序号（从 1 开始）"]],
+        body: `{"prompt": "extreme close-up, perfume bottle, …", "locked_fields": ["prompt"]}` },
+      { m: "POST", p: "/api/prompt-projects/{project_id}/shots/{shot_index}/regenerate", t: "重生成单镜", d: "只重新生成该镜的提示词，锁定字段保持不变。" },
+      { m: "GET", p: "/api/prompt-projects/{project_id}/entity-bible", t: "实体圣经", d: "跨镜头一致性定义：角色 / 产品 / 服装 / 场景与一致性规则。" },
+      { m: "PATCH", p: "/api/prompt-projects/{project_id}/entity-bible", t: "更新实体圣经", d: "整体替换实体圣经，后续重生成会应用新定义。" },
+      { m: "GET", p: "/api/prompt-projects/{project_id}/versions", t: "版本列表", d: "每次生成 / 人工编辑都会落一个版本，可回溯。" },
+      { m: "GET", p: "/api/prompt-projects/{project_id}/versions/{version_id}", t: "版本详情", d: "某一版本的完整方案快照。" },
+      { m: "GET", p: "/api/prompt-projects/{project_id}/versions/compare", t: "对比两个版本", d: "逐镜 diff 两个版本的提示词差异。",
+        params: [["left_id", "string", 1, "左版本"], ["right_id", "string", 1, "右版本"]] },
+      { m: "POST", p: "/api/prompt-projects/{project_id}/versions/{version_id}/restore", t: "恢复版本", d: "把某一历史版本恢复为当前方案（同样落一个新版本）。" },
+      { m: "GET", p: "/api/prompt-projects/{project_id}/comparison", t: "参考对比", d: "关联了逆向项目时，输出「参考镜头 vs 生成提示词」的逐镜对照。" },
+      { m: "GET", p: "/api/prompt-projects/{project_id}/export", t: "导出方案", d: "format=md | json，导出当前方案的文档。" },
+      { m: "GET", p: "/api/prompt-projects/{project_id}/export/zip", t: "导出 ZIP", d: "打包导出方案文档、逐镜提示词与实体圣经。" },
+      { m: "GET", p: "/api/model-profiles", t: "模型档案", d: "可选目标模型（即梦 / 可灵 / Sora 等）的能力与参数建议，供简报下拉使用。" },
+    ],
+  },
+  {
+    id: "generation", title: "视频生成", desc: "从配方到成片",
+    items: [
+      { m: "GET", p: "/api/generation/capabilities", t: "生成能力", d: "返回当前生成服务商、支持的画幅与并发上限。平台由服务端配置，前端不经手 API Key。",
+        res: `{ "provider": "jimeng", "aspect_ratios": ["16:9", "9:16", "1:1"], "max_active_jobs": 2 }` },
+      { m: "POST", p: "/api/prompt-projects/{project_id}/generation-jobs", t: "创建生成任务（202）", d: "从已完成的提示词方案创建视频生成任务。idempotency_key 幂等重试安全；方案无效 409、镜头越界 422、服务商不可用 503。",
+        body: `{
+  "shot_indices": [1, 2, 3, 4],
+  "aspect_ratio": "16:9",
+  "model": "jimeng-03",
+  "idempotency_key": "demo-run-001"
+}`,
+        res: `{ "job_id": "e9f0…", "status": "queued", "reused": false }` },
+      { m: "GET", p: "/api/prompt-projects/{project_id}/generation-jobs", t: "生成任务列表", d: "该项目最近 50 条生成任务，含逐镜结果与进度。" },
+      { m: "GET", p: "/api/generation-jobs/{job_id}", t: "生成任务详情", d: "单条任务状态与每个镜头的生成结果 / 失败原因。" },
+      { m: "POST", p: "/api/generation-jobs/{job_id}/cancel", t: "取消生成任务", d: "取消排队或运行中的生成任务并返回最终状态。" },
+      { m: "GET", p: "/api/generation-jobs/{job_id}/shots/{shot_index}/video", t: "下载生成成片", d: "下载某一镜生成完成的视频文件。",
+        params: [["shot_index", "integer", 1, "镜头序号"]] },
+    ],
+  },
+  {
+    id: "insights", title: "洞察 · 模板 · 回测", desc: "成本 · 质量 · 复用",
+    items: [
+      { m: "POST", p: "/api/projects/estimate-cost", t: "预估分析成本", d: "按视频时长与镜头数粗估视觉分析成本（不含 ASR 与真实视频生成费用）。",
+        body: `{"video_duration": 22.5, "estimated_shots": 9}`,
+        res: `{ "estimated_shots": 9, "input_tokens": 17400, "cost_cny": 0.9 }` },
+      { m: "GET", p: "/api/insights/quality", t: "质量仪表盘", d: "聚合窗口内镜头修正率、字段修正频率、分析耗时与 token 消耗。指标基于人工编辑事件，不等同于模型真实准确率。",
+        params: [["days", "integer", 0, "统计窗口天数，7–90，默认 30"]] },
+      { m: "GET", p: "/api/projects/{project_id}/cost", t: "项目实际成本", d: "最近一次分析任务的用量指标与成本估算。" },
+      { m: "GET", p: "/api/prompt-projects/{project_id}/cost", t: "提示词项目成本", d: "提示词生成的用量指标与成本估算。" },
+      { m: "GET", p: "/api/projects/{project_id}/edit-events", t: "编辑事件", d: "记录人工修正镜头字段的事件流，是质量指标的原始数据。",
+        params: [["limit", "integer", 0, "1–200，默认 50"]] },
+      { m: "GET", p: "/api/shot-templates", t: "镜头模板列表", d: "可复用的镜头模板库，支持搜索与分类筛选。",
+        params: [["search", "string", 0, "关键词"], ["category", "string", 0, "分类"], ["limit", "integer", 0, "默认 50"]] },
+      { m: "GET", p: "/api/shot-templates/facets", t: "模板分面", d: "模板分类与标签的聚合统计，用于筛选器。" },
+      { m: "DELETE", p: "/api/shot-templates/{template_id}", t: "删除模板", d: "删除一个自定义模板。" },
+      { m: "POST", p: "/api/projects/{project_id}/shots/{shot_id}/save-template", t: "保存为模板", d: "把当前镜头的分析结果存为可复用模板。",
+        body: `{"name": "产品特写缓推", "category": "产品广告", "tags": ["特写", "缓推"]}` },
+      { m: "POST", p: "/api/prompt-projects/{project_id}/apply-template", t: "应用模板", d: "把模板字段批量应用到方案的若干镜头，fields 指定要覆盖的字段。",
+        body: `{"template_id": 7, "shot_indices": [1, 2], "fields": ["shot_type", "camera_movement", "lighting"]}` },
+      { m: "POST", p: "/api/prompt-projects/{project_id}/reviews", t: "上传成片回测（multipart）", d: "上传按方案生成的成片，与原方案逐镜对照评分。",
+        params: [["file", "file", 1, "成片视频"], ["note", "string", 0, "备注"]] },
+      { m: "GET", p: "/api/prompt-projects/{project_id}/reviews", t: "回测记录列表", d: "该项目全部回测记录。" },
+      { m: "GET", p: "/api/prompt-projects/{project_id}/reviews/{review_id}", t: "回测详情", d: "单条回测的逐镜对照与评分。" },
+      { m: "DELETE", p: "/api/prompt-projects/{project_id}/reviews/{review_id}", t: "删除回测", d: "删除一条回测记录。" },
+    ],
+  },
+  {
+    id: "share", title: "分享协作", desc: "只读链接 · 评论",
+    items: [
+      { m: "POST", p: "/api/prompt-projects/{project_id}/shares", t: "创建分享（201）", d: "为方案生成一个只读分享 token。",
+        res: `{ "share_id": 31, "token": "sH4rE…", "url": "/share/sH4rE…" }` },
+      { m: "GET", p: "/api/prompt-projects/{project_id}/shares", t: "分享列表", d: "该项目全部有效分享链接。" },
+      { m: "DELETE", p: "/api/prompt-projects/{project_id}/shares/{share_id}", t: "撤销分享", d: "吊销后链接立即失效。" },
+      { m: "GET", p: "/api/prompt-projects/{project_id}/shares/{share_id}/qr.svg", t: "分享二维码", d: "返回可直链引用的二维码 SVG。" },
+      { m: "GET", p: "/share/{token}", t: "分享页（HTML，公开）", d: "给协作者打开的只读方案页面，免认证。" },
+      { m: "GET", p: "/api/shares/{token}", t: "分享内容（公开）", d: "token 对应的方案 JSON 数据。" },
+      { m: "GET", p: "/api/shares/{token}/comments", t: "分享评论（公开）", d: "协作者在分享页留下的评论。" },
+      { m: "POST", p: "/api/shares/{token}/comments", t: "发表评论（201，公开）", d: "在分享页发表一条评论。",
+        body: `{"author": "张三", "content": "第二镜的光线建议再硬一点"}` },
+    ],
+  },
+];
+
+/* =============== 渲染 =============== */
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const hlJSON = (s) => esc(s)
+  .replace(/&quot;([^&]*?)&quot;(\s*:)/g, '<span class="tok-k">"$1"</span>$2')
+  .replace(/:\s&quot;([^]*?)&quot;/g, ': <span class="tok-s">"$1"</span>')
+  .replace(/:\s(-?\d+\.?\d*)/g, ': <span class="tok-n">$1</span>')
+  .replace(/^(\/\/.*)$/gm, '<span class="tok-c">$1</span>');
+const hlCurl = (s) => esc(s)
+  .replace(/^(curl|POST|GET|PATCH|DELETE)\b/gm, '<span class="tok-m">$1</span>')
+  .replace(/^(\/\/.*)$/gm, '<span class="tok-c">$1</span>')
+  .replace(/(-F?&nbsp;|-F )&?quot;/g, "$1");
+
+function pathHTML(p) {
+  return esc(p).replace(/\{(\w+)\}/g, '<span class="pvar">{$1}</span>');
+}
+function cardHTML(item) {
+  const methodCls = "m-" + item.m.toLowerCase();
+  const pid = (item.m + item.p).replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+  let h = `<article class="card" id="${pid}" data-search="${esc((item.m + " " + item.p + " " + item.t + " " + (item.d || "")).toLowerCase())}">`;
+  h += `<div class="card-head">
+    <span class="method ${methodCls}">${item.m}</span>
+    <span class="path">${pathHTML(item.p)}</span>
+    <button class="copy-btn" type="button" data-copy="${esc(item.m + " " + item.p)}">复制</button>
+  </div>`;
+  if (item.t) h += `<p class="card-title">${esc(item.t)}</p>`;
+  if (item.d) h += `<p class="card-desc">${item.d}</p>`;
+  if (item.params) {
+    h += `<table class="params"><thead><tr><th>参数</th><th>类型</th><th>必填</th><th>说明</th></tr></thead><tbody>`;
+    for (const [name, type, req, note] of item.params) {
+      h += `<tr><td>${esc(name)}</td><td>${esc(type)}</td><td>${req ? '<span class="req">必填</span>' : '<span class="opt">可选</span>'}</td><td>${esc(note)}</td></tr>`;
+    }
+    h += `</tbody></table>`;
+  }
+  if (item.body) h += `<div class="codeblock"><span class="codeblock-label">BODY</span><pre><code>${hlJSON(item.body)}</code></pre></div>`;
+  if (item.curl) h += `<div class="codeblock"><span class="codeblock-label">SHELL</span><pre><code>${hlCurl(item.curl)}</code></pre></div>`;
+  if (item.res) h += `<div class="codeblock"><span class="codeblock-label">RESPONSE</span><pre><code>${hlJSON(item.res)}</code></pre></div>`;
+  if (item.errs) h += `<div class="note warn"><span class="dot"></span><div><b>错误：</b>${esc(item.errs)}</div></div>`;
+  h += `</article>`;
+  return h;
+}
+
+const sectionsEl = document.getElementById("sections");
+const navEl = document.getElementById("nav");
+let total = 0;
+for (const group of API) {
+  total += group.items.length;
+  const sec = document.createElement("div");
+  sec.className = "section";
+  sec.id = "sec-" + group.id;
+  sec.innerHTML = `<div class="section-head">
+      <span class="idx">${String(API.indexOf(group) + 1).padStart(2, "0")}</span>
+      <h2>${esc(group.title)}</h2>
+      <span class="desc">${esc(group.desc)}</span>
+    </div>` + group.items.map(cardHTML).join("");
+  sectionsEl.appendChild(sec);
+}
+document.getElementById("ep-total").textContent = total;
+
+/* sidebar nav */
+navEl.innerHTML = `<div class="nav-group">
+    <p>指南</p>
+    <a class="nav-link" href="#sec-overview" data-target="sec-overview">快速开始</a>
+  </div>` + API.map((g, i) => `<div class="nav-group">
+    <p>${esc(g.title)}</p>
+    <a class="nav-link" href="#sec-${g.id}" data-target="sec-${g.id}">${esc(g.title)}<span class="cnt">${String(g.items.length).padStart(2, "0")}</span></a>
+  </div>`).join("");
+
+/* copy buttons */
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest(".copy-btn");
+  if (!btn) return;
+  navigator.clipboard.writeText(btn.dataset.copy).then(() => {
+    btn.classList.add("ok");
+    btn.textContent = "已复制";
+    setTimeout(() => { btn.classList.remove("ok"); btn.textContent = "复制"; }, 1400);
+  });
+});
+
+/* search */
+const q = document.getElementById("q");
+const cards = () => document.querySelectorAll(".card");
+function applyFilter() {
+  const needle = q.value.trim().toLowerCase();
+  const noResults = document.getElementById("no-results");
+  let visible = 0;
+  document.querySelectorAll(".section").forEach((sec) => {
+    if (sec.id === "sec-overview") return;
+    let secVisible = 0;
+    sec.querySelectorAll(".card").forEach((card) => {
+      const hit = !needle || card.dataset.search.includes(needle);
+      card.style.display = hit ? "" : "none";
+      if (hit) { secVisible++; visible++; }
+    });
+    const head = sec.querySelector(".section-head");
+    head.style.display = secVisible ? "" : "none";
+  });
+  noResults.style.display = visible ? "none" : "block";
+}
+q.addEventListener("input", applyFilter);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "/" && document.activeElement !== q) { e.preventDefault(); q.focus(); }
+  if (e.key === "Escape") { q.value = ""; applyFilter(); q.blur(); }
+});
+
+/* scrollspy */
+const spy = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    if (!entry.isIntersecting) continue;
+    const id = entry.target.id;
+    navEl.querySelectorAll(".nav-link").forEach((a) => {
+      a.classList.toggle("is-active", a.dataset.target === id);
+    });
+  }
+}, { rootMargin: "-15% 0px -70% 0px" });
+document.querySelectorAll(".section").forEach((s) => spy.observe(s));
+
+/* mobile menu */
+document.getElementById("menu").addEventListener("click", () => {
+  document.getElementById("side").classList.toggle("open");
+});
+navEl.addEventListener("click", (e) => {
+  if (e.target.closest(".nav-link")) document.getElementById("side").classList.remove("open");
+});
+</script>
+</body>
+</html>

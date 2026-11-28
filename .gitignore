@@ -13,3 +13,6 @@ Thumbs.db
 node_modules/
 web/dist/
 .npm-cache/
+
+# Claude Code local tooling (skills, fonts)
+.claude/
