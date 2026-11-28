@@ -27,6 +27,19 @@ function ModeLabel({ mode, loading, insecure }: { mode?: string; loading: boolea
   return { text: "服务在线", tone: "online", detail: "真实模型分析已启用" };
 }
 
+function crumbFor(pathname: string): string {
+  if (pathname.startsWith("/generate")) {
+    return "提示词工作台";
+  }
+  if (pathname.startsWith("/quality")) {
+    return "质量观测";
+  }
+  if (/^\/reverse\/.+/.test(pathname)) {
+    return "项目详情";
+  }
+  return "工作台";
+}
+
 export function AppLayout() {
   const health = useApiQuery((signal) => fetchHealth(signal), []);
   const navigate = useNavigate();
@@ -54,43 +67,55 @@ export function AppLayout() {
         跳到主要内容
       </a>
       <div className="rr-app">
-        <header className="rr-topbar">
-          <NavLink className="rr-brand" to="/reverse" aria-label="ReelReverse 工作台">
-            <span className="rr-brand-mark" aria-hidden="true"><Icon name="film" size={20} /></span>
-            <span className="rr-brand-copy"><strong>ReelReverse</strong><small>AI VIDEO STUDIO</small></span>
+        <nav className="rr-rail" aria-label="主导航">
+          <NavLink className="rr-rail-logo" to="/reverse" aria-label="ReelReverse 首页">
+            <Icon name="film" size={20} />
           </NavLink>
 
-          <nav className="rr-nav" aria-label="主导航">
+          <div className="rr-rail-links">
             {MODES.map((mode) => (
-              <NavLink key={mode.to} to={mode.to} className={({ isActive }) => `rr-nav-link${isActive ? " is-active" : ""}`}>
-                {mode.label}
+              <NavLink
+                key={mode.to}
+                to={mode.to}
+                className={({ isActive }) => `rr-rail-link${isActive ? " is-active" : ""}`}
+                title={mode.label}
+                aria-label={mode.label}
+              >
+                <Icon name={mode.icon} size={20} />
               </NavLink>
             ))}
-          </nav>
+            <a className="rr-rail-link" href="/docs" target="_blank" rel="noreferrer" title="API 文档" aria-label="打开 API 文档">
+              <Icon name="external" size={18} />
+            </a>
+          </div>
 
-          <div className="rr-topbar-actions">
+          <span className="rr-rail-spacer" />
+
+          <span className="rr-avatar" title="本地工作区" aria-label="本地工作区">LR</span>
+        </nav>
+
+        <div className="rr-wrap">
+          <header className="rr-topbar">
+            <span className="rr-crumb">{crumbFor(location.pathname)}</span>
             <span className={`rr-status-pill is-${status.tone}`} title={status.detail} aria-live="polite">
               <i aria-hidden="true" />
               {status.text}
             </span>
-            <a className="rr-icon-btn" href="/docs" target="_blank" rel="noreferrer" aria-label="打开 API 文档">
-              <Icon name="external" size={16} />
-            </a>
+            <span className="rr-topbar-spacer" />
             <button className="rr-btn rr-btn-primary rr-topbar-cta" type="button" onClick={startAnalysis}>
               <Icon name="plus" size={15} /> 新建分析
             </button>
-            <span className="rr-avatar" aria-label="本地工作区">LR</span>
-          </div>
-        </header>
+          </header>
 
-        <main id="react-main" className="rr-main">
-          <Outlet />
-        </main>
+          <main id="react-main" className="rr-main">
+            <Outlet />
+          </main>
 
-        <footer className="rr-footer">
-          <span>ReelReverse · 把参考片变成可复用的创作配方</span>
-          <span className="rr-footer-status"><i className={`rr-status-dot is-${status.tone}`} aria-hidden="true" />{status.text}{activeJobs ? ` · ${activeJobs} 个任务运行中` : ""}</span>
-        </footer>
+          <footer className="rr-footer">
+            <span>ReelReverse · 把参考片变成可复用的创作配方</span>
+            <span className="rr-footer-status"><i className={`rr-status-dot is-${status.tone}`} aria-hidden="true" />{status.text}{activeJobs ? ` · ${activeJobs} 个任务运行中` : ""}</span>
+          </footer>
+        </div>
 
         <nav className="rr-mobile-nav" aria-label="移动端导航">
           {MODES.map((mode) => (

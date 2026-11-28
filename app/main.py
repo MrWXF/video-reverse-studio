@@ -51,6 +51,10 @@ app = FastAPI(
         "视频逆向与提示词生成工作台。`/api` 为兼容入口，`/api/v1` 为正式版本入口；"
         "两个入口共享同一套 v1 语义。"
     ),
+    # ``/docs`` is a hand-written reference page; the OpenAPI schema stays
+    # available at ``/openapi.json`` for tooling and code generation.
+    docs_url=None,
+    redoc_url=None,
 )
 app.add_middleware(RequestContextMiddleware)
 app.add_middleware(BasicAuthMiddleware)
@@ -67,6 +71,13 @@ app.mount(
 )
 templates = Jinja2Templates(directory=str(PROJECT_ROOT / "app" / "templates"))
 react_index = PROJECT_ROOT / "app" / "static" / "react" / "index.html"
+docs_index = PROJECT_ROOT / "app" / "static" / "docs" / "index.html"
+
+
+@app.get("/docs", include_in_schema=False)
+def api_docs():
+    """Serve the hand-written API reference instead of the Swagger UI."""
+    return FileResponse(docs_index)
 
 
 def custom_openapi() -> dict:

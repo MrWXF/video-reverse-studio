@@ -150,6 +150,18 @@ def test_react_app_reports_missing_build(ui_client, monkeypatch, tmp_path):
     assert "npm run build" in response.json()["detail"]
 
 
+def test_docs_serves_api_reference_page(ui_client):
+    response = ui_client.get("/docs")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "ReelReverse · API 文档" in response.text
+    # The page is the hand-written reference, not the Swagger UI scaffold.
+    assert "swagger-ui" not in response.text.lower()
+    # The machine-readable schema stays available for tooling.
+    assert ui_client.get("/openapi.json").status_code == 200
+
+
 def test_react_reverse_workspace_includes_timeline_and_safe_delete():
     root = Path(__file__).resolve().parent.parent
     detail = (root / "web" / "src" / "features" / "reverse" / "ProjectDetail.tsx").read_text(

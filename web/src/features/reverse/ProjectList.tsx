@@ -3,6 +3,7 @@
 import type { ProjectSummary } from "../../api/types";
 import { Icon } from "../../components/Icon";
 import { StatusBadge } from "../../components/StatusBadge";
+import { formatClock } from "../../utils/format";
 
 type ProjectFilter = "all" | "active" | "done" | "attention";
 
@@ -14,7 +15,6 @@ interface ProjectListProps {
   onSelect: (projectId: string) => void;
   onRefresh: () => void;
   onStart?: () => void;
-  compact?: boolean;
 }
 
 function dateLabel(value: string | null): string {
@@ -53,7 +53,7 @@ function matchesFilter(project: ProjectSummary, filter: ProjectFilter): boolean 
   return true;
 }
 
-export function ProjectList({ projects, activeId, loading, error, onSelect, onRefresh, onStart, compact = false }: ProjectListProps) {
+export function ProjectList({ projects, activeId, loading, error, onSelect, onRefresh, onStart }: ProjectListProps) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<ProjectFilter>("all");
   const filtered = useMemo(() => {
@@ -72,7 +72,7 @@ export function ProjectList({ projects, activeId, loading, error, onSelect, onRe
   }), [projects]);
 
   return (
-    <section className={`rr-card rr-project-browser${compact ? " is-compact" : ""}`} id="projects-panel" aria-labelledby="projects-title">
+    <section className="rr-card rr-project-browser" id="projects-panel" aria-labelledby="projects-title">
       <div className="rr-card-head">
         <div><p className="rr-eyebrow">PROJECT LIBRARY</p><h2 id="projects-title">最近项目</h2></div>
         <div className="rr-card-actions">
@@ -103,7 +103,7 @@ export function ProjectList({ projects, activeId, loading, error, onSelect, onRe
         </div>
       </div>
 
-      <div className="rr-project-rows">
+      <div className="rr-gallery">
         {error ? (
           <div className="rr-inline-empty is-error"><Icon name="alert" size={20} /><p>{error}</p><button className="rr-btn rr-btn-ghost" type="button" onClick={onRefresh}>重试</button></div>
         ) : filtered.length === 0 ? (
@@ -119,22 +119,25 @@ export function ProjectList({ projects, activeId, loading, error, onSelect, onRe
           const duration = project.duration ? `${project.duration.toFixed(1)} 秒` : "时长待读取";
           return (
             <button
-              className={`rr-project-row${project.id === activeId ? " is-selected" : ""}`}
+              className={`rr-gallery-card${project.id === activeId ? " is-selected" : ""}`}
               type="button"
               key={project.id}
               data-status={project.status}
               aria-label={`打开项目 ${project.title}`}
               onClick={() => onSelect(project.id)}
             >
-              <span className="rr-project-poster"><Icon name="film" size={18} /></span>
-              <span className="rr-project-row-copy">
-                <span className="rr-project-row-title"><strong>{project.title}</strong><StatusBadge status={project.status} /></span>
-                <span className="rr-project-row-meta">{project.shot_count} 个镜头 · {duration} · {dateLabel(project.created_at)}</span>
+              <span className="rr-gallery-thumb">
+                <Icon name="film" size={26} />
+                <span className="rr-gallery-tag"><StatusBadge status={project.status} /></span>
+                {project.duration ? <b>{formatClock(project.duration)}</b> : null}
+              </span>
+              <span className="rr-gallery-meta">
+                <strong>{project.title}</strong>
+                <small>{project.shot_count} 个镜头 · {duration} · {dateLabel(project.created_at)}</small>
                 {running ? (
                   <span className="rr-project-progress"><i style={{ width: `${progress}%` }} /><small>{progress}%</small></span>
                 ) : null}
               </span>
-              <Icon name="arrow-right" size={16} className="rr-project-row-arrow" />
             </button>
           );
         })}

@@ -22,9 +22,12 @@
 ## 1. 首次部署步骤（已执行）
 
 ```bash
-# 1) 本地打包（排除无关内容）
+# 1) 本地打包（排除无关内容；⚠️ 必须排除 .env，否则会覆盖服务器生产配置）
 tar -czf /tmp/vrs.tar.gz --exclude=.git --exclude=.venv --exclude=data \
-    --exclude=.idea --exclude=__pycache__ .
+    --exclude=.idea --exclude='**/__pycache__' --exclude=.env \
+    --exclude=web/node_modules --exclude=.npm-cache --exclude='*.egg-info' \
+    --exclude=deploy-package.tar.gz --exclude=docker --exclude=docker-compose.prod.yml \
+    --exclude=debug.log .
 
 # 2) 上传并解压
 ssh ubuntu@49.234.13.105 "mkdir -p ~/video-reverse-studio"
@@ -41,8 +44,15 @@ ssh ubuntu@49.234.13.105 "tar -xzf ~/vrs.tar.gz -C ~/video-reverse-studio"
 
 ```bash
 # 本地（Git Bash）
+# 0) 若 web/ 前端有改动，先重新构建（产物输出到 app/static/react/）
+cd web && npm install && npm run build && cd ..
+
+# 1) 打包 —— ⚠️ --exclude=.env 必须保留：否则本地 mock 配置会覆盖服务器生产网关配置
 tar -czf /tmp/vrs.tar.gz --exclude=.git --exclude=.venv --exclude=data \
-    --exclude=.idea --exclude=__pycache__ .
+    --exclude=.idea --exclude='**/__pycache__' --exclude=.env \
+    --exclude=web/node_modules --exclude=.npm-cache --exclude='*.egg-info' \
+    --exclude=deploy-package.tar.gz --exclude=docker --exclude=docker-compose.prod.yml \
+    --exclude=debug.log .
 scp /tmp/vrs.tar.gz ubuntu@49.234.13.105:~/
 
 # 服务器
